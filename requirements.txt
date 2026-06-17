@@ -3,6 +3,7 @@ ollama
 python-dateutil
 pandas
 streamlit
+extra-streamlit-components
 plotly
 watchdog
 pyarrow

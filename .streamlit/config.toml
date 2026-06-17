@@ -10,6 +10,6 @@ headless = true
 # Bind is set via CLI flags in run_web.sh; these are safe fallbacks.
 address = "0.0.0.0"
 port = 8501
-# Allow access via the Spark's Tailscale MagicDNS hostname.
-enableCORS = false
+# Keep XSRF protection on (the auth cookie flow relies on it). Leave CORS at its
+# default — disabling it conflicts with XSRF protection.
 enableXsrfProtection = true
