@@ -45,3 +45,29 @@ Reasonable choices made during the one-shot build, so they're easy to revisit.
 
 10. **Batch-paste splitting** on a line of `---`/`===` or two-plus blank lines —
     a simple, predictable convention documented in the UI.
+
+11. **Persistent login via a signed cookie** (`extra-streamlit-components`,
+    user-approved). The cookie stores an HMAC token (key = `JOURNAL_AUTH_SECRET`,
+    defaulting to the password), never the password. Streamlit has no native
+    cookie-write API, so a small component is required; this was chosen over a
+    URL-token scheme to keep the token out of the URL/history/logs.
+
+12. **Chat-model picker** lists every model from `ollama.list()` (including
+    embedding models like bge-m3 — Ollama doesn't reliably distinguish them, and
+    the user asked for "any" model). The selection drives RAG + enrichment, is
+    remembered per browser in a cookie, and falls back to the default if the
+    remembered model is no longer served.
+
+13. **Model choice persisted via the existing cookie store**, not browser
+    `localStorage`. localStorage would need an additional component dependency,
+    whereas the auth cookie manager is already present; this meets the goal
+    (per-browser persistence + availability fallback) with zero new dependencies.
+
+14. **Short / year-last filename dates** (`1.03.25`, `01/03/2025`) are parsed with
+    a 1970–2069 two-digit-year pivot and **US month-first** disambiguation by
+    default (flip with `JOURNAL_DATE_DAYFIRST`). If month-first is impossible
+    (first field > 12) we auto-fall back to day-first.
+
+15. **Entry removal** is exposed both in the CLI (`list`, `remove` by id / date
+    range / `--all`, with confirmation unless `--yes`) and the web UI (Manage
+    panel). Deletes are by `entry_id` and rebuild the FTS index afterward.

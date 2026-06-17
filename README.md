@@ -11,7 +11,9 @@ storage + full-text search, Ollama (localhost) for embeddings and generation.
   processes new/changed entries).
 - **Date** each entry by **filename → header line → file mtime** (or an explicit
   date for pastes), recording which source was used and warning when too many fall
-  back to mtime.
+  back to mtime. Filename dates support `YYYYMMDD`, `2013-05-04`, and short
+  year-last forms like `1.03.25` / `01/03/2025` (US month-first by default; set
+  `JOURNAL_DATE_DAYFIRST=true` for day-first).
 - **Search** with hybrid dense (`bge-m3`) + BM25 retrieval fused by reciprocal-rank
   fusion, with a date-range prefilter.
 - **Ask** questions (RAG) with answers that cite entry dates and refuse gracefully
@@ -46,8 +48,11 @@ It binds to `JOURNAL_WEB_HOST` (default `0.0.0.0`) on `JOURNAL_WEB_PORT`
 
 > **http://spark-0d62.tail9e6b2f.ts.net:8501**
 
-Open that from the Mac Studio. The first screen asks for `JOURNAL_PASSWORD`; once
-unlocked, the session stays authenticated until you press **Log out**.
+Open that from the Mac Studio. The first screen asks for `JOURNAL_PASSWORD`.
+With **Remember this browser** checked, an HMAC-signed cookie keeps you logged in
+across reloads, new tabs, and restarts — you only enter the password once per
+browser. **Log out** clears the cookie. Changing the password (or
+`JOURNAL_AUTH_SECRET`) invalidates every remembered browser.
 
 **Keep it tailnet-only.** Binding `0.0.0.0` exposes it on every local interface,
 but it should only ever be reachable over your tailnet. Do **not** port-forward it
@@ -58,28 +63,43 @@ set `JOURNAL_WEB_HOST` to the Spark's Tailscale IP, e.g. `100.81.153.68`.)
 1. **Add entries** — paste a single entry (optional date; inferred if blank), paste
    a batch (split on `---`/`===` or blank lines), or upload multiple `.txt` files.
    Submitting dates → chunks → embeds → indexes immediately and shows you exactly
-   what was ingested and the date source used for each.
+   what was ingested and the date source used for each. A **Manage / remove
+   entries** panel lists everything indexed and lets you delete entries by
+   selection, by date range, or all of them.
 2. **Analysis** — charts for entries/year, mean mood/year, and top
    people/places/topics, with a date-range filter and a button to run/refresh
    enrichment.
 3. **Query** — chat-style RAG with optional From/To dates, showing the answer,
    cited entry dates, and the underlying excerpts.
 
+The sidebar has a **chat-model picker** listing every model your Ollama server
+serves; the choice drives RAG answers and enrichment and is remembered per
+browser.
+
 ## CLI
 ```bash
 python cli.py ingest ./journals                 # batch ingest a directory
 python cli.py ingest                            # sweep the drop folder
 python cli.py watch                             # auto-ingest the drop folder on change
-python cli.py enrich [--limit N]                # LLM tagging pass (resumable)
+python cli.py enrich [--limit N] [--model TAG]  # LLM tagging pass (resumable)
 python cli.py search "panic about money" --from 2019-01-01 --to 2019-12-31
-python cli.py ask "how did I talk about Max over time?"
+python cli.py ask "how did I talk about Max over time?" [--model TAG]
 python cli.py stats
+python cli.py list                              # list indexed entries + ids
+python cli.py remove 2019-07-14.txt             # remove by entry id
+python cli.py remove --from 2019-01-01 --to 2019-12-31   # remove a date range
+python cli.py remove --all -y                   # remove everything (no prompt)
 ```
+`--model TAG` overrides the configured chat model for that run (any tag Ollama
+serves). `remove` prompts for confirmation unless you pass `--yes`/`-y`.
 
 ## Configuration (environment variables)
 | Variable | Default | Meaning |
 |---|---|---|
 | `JOURNAL_PASSWORD` | *(required)* | Web UI password. App refuses to start if unset. |
+| `JOURNAL_AUTH_SECRET` | *(password)* | Signing key for the remember-me cookie. Defaults to the password. |
+| `JOURNAL_AUTH_DAYS` | `30` | Remember-me cookie lifetime (days). |
+| `JOURNAL_DATE_DAYFIRST` | `false` | Treat ambiguous numeric filenames as day-first (e.g. `1.03.25` → Mar 1). |
 | `JOURNAL_WEB_HOST` | `0.0.0.0` | Bind address. |
 | `JOURNAL_WEB_PORT` | `8501` | Bind port. |
 | `OLLAMA_HOST` | `http://localhost:11434` | Local Ollama endpoint. |

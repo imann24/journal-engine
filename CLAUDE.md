@@ -20,8 +20,10 @@ telemetry, ever.**
   the password file (`.env`). Do not weaken these rules.
 - **The web UI is password-gated.** Read `JOURNAL_PASSWORD` from the environment
   (via the gitignored `.env`). Compare with `hmac.compare_digest`. If it is unset,
-  the app refuses to start. Auth state lives in Streamlit `session_state`; there
-  is a logout control. No third-party auth dependency.
+  the app refuses to start. Login persists per browser via an HMAC-signed cookie
+  (`journal/webauth.py` + `extra-streamlit-components` CookieManager) — the cookie
+  holds a token, never the password; changing the password invalidates it. There
+  is a logout control that clears the cookie.
 - **Tailnet-only.** The server binds `0.0.0.0:<port>` so the Mac Studio can reach
   it over Tailscale at the Spark's MagicDNS name. It must never be port-forwarded
   or exposed to the public internet.
@@ -36,7 +38,8 @@ telemetry, ever.**
   date-range prefilter.
 - Web UI: single-process **Streamlit** app (`app.py`).
 - Approved dependencies only: `lancedb, ollama, python-dateutil, pandas,
-  streamlit, plotly, watchdog, pyarrow, pytest`. **Ask before adding any other
+  streamlit, plotly, watchdog, pyarrow, pytest`, plus `extra-streamlit-components`
+  (user-approved, for the persistent-login cookie). **Ask before adding any other
   dependency.** (Note: we deliberately read tables via `tbl.to_arrow().to_pandas()`
   to avoid pulling in the optional `pylance` package.)
 
@@ -48,15 +51,17 @@ journal/
   chunking.py    keep short entries whole; split long ones by paragraph w/ overlap
   embeddings.py  Ollama bge-m3 dense embeddings
   llm.py         Ollama chat
-  store.py       LanceDB schema, open/create, dedup bookkeeping (content_hash)
+  store.py       LanceDB schema, open/create, dedup bookkeeping; list/remove entries
+  webauth.py     pure HMAC token helpers for the persistent-login cookie
   ingest.py      one idempotent/incremental pipeline for all sources
   search.py      hybrid RRF search + date prefilter
   rag.py         grounded Q&A with citations + graceful refusal
   enrich.py      re-runnable per-entry LLM tagging (mood/topics/people/places)
   stats.py       analytics over enriched columns (entry-level)
   watch.py       watchdog drop-folder auto-ingest
-cli.py           ingest / enrich / search / ask / stats / watch
-app.py           Streamlit UI: Add entries / Analysis / Query (all behind auth)
+cli.py           ingest / enrich / search / ask / stats / watch / list / remove
+app.py           Streamlit UI: Add entries / Analysis / Query (all behind auth),
+                 sidebar chat-model picker (remembered per browser)
 tests/           date inference (critical), chunking, ingest idempotency
 run_web.sh       launches the UI bound to JOURNAL_WEB_HOST:JOURNAL_WEB_PORT
 ```
