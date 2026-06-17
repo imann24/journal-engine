@@ -1,0 +1,24 @@
+# --- Secrets: NEVER commit the password ---
+.env
+.env.*
+!.env.example
+
+# --- The journal corpus: NEVER commit personal entries ---
+/journals/
+/drop/
+*.txt
+!requirements*.txt
+
+# --- The index: embeddings of personal entries, do not commit ---
+/journal_lancedb/
+*.lance/
+
+# --- Python ---
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# --- OS / editor ---
+.DS_Store

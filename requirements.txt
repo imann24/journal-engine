@@ -1,0 +1,9 @@
+lancedb
+ollama
+python-dateutil
+pandas
+streamlit
+plotly
+watchdog
+pyarrow
+pytest

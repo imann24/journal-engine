@@ -1,0 +1,15 @@
+# Streamlit config. The bind address/port are passed on the command line by
+# run_web.sh (from JOURNAL_WEB_HOST / JOURNAL_WEB_PORT) so they stay env-driven.
+
+[browser]
+# No telemetry, ever. This is the most personal data the user owns.
+gatherUsageStats = false
+
+[server]
+headless = true
+# Bind is set via CLI flags in run_web.sh; these are safe fallbacks.
+address = "0.0.0.0"
+port = 8501
+# Allow access via the Spark's Tailscale MagicDNS hostname.
+enableCORS = false
+enableXsrfProtection = true

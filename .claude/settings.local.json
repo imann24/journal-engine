@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ollama --version)",
+      "Bash(ollama list *)",
+      "Bash(tailscale status *)",
+      "Bash(pip --version)",
+      "Bash(python3 -c \"import sys; print\\(sys.executable\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('DNSName:', d['Self'].get\\('DNSName'\\)\\); print\\('MagicDNSSuffix:', d.get\\('MagicDNSSuffix'\\)\\)\")",
+      "Bash(python3 -c \"import lancedb; print\\('lancedb', lancedb.__version__\\)\")",
+      "Bash(python3 -c \"import streamlit; print\\('streamlit', streamlit.__version__\\)\")",
+      "Bash(python3 -c \"import ollama; print\\('ollama-py present'\\)\")",
+      "Bash(python3 -m venv .venv)",
+      "Bash(.venv/bin/python -m pip install --upgrade pip -q)",
+      "Bash(ollama pull *)",
+      "Bash(.venv/bin/python -m pip install -q lancedb ollama python-dateutil pandas streamlit plotly watchdog pyarrow pytest)",
+      "Bash(.venv/bin/python -c \"import lancedb,ollama,streamlit,plotly,watchdog,pyarrow,pandas,dateutil; print\\('imports OK'\\)\")",
+      "Bash(.venv/bin/python -c \"import lancedb; print\\('lancedb', lancedb.__version__\\)\")"
+    ]
+  }
+}
