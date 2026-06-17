@@ -94,3 +94,46 @@ def test_batch_split(fresh_db):
     blob = "Entry one about home.\n\n---\n\nEntry two about work."
     s = ingest_mod.ingest_batch(blob)
     assert s.added == 2
+
+
+def test_list_and_remove_entries(fresh_db):
+    d = fresh_db / "journals"
+    d.mkdir()
+    (d / "2013-05-04.txt").write_text("First entry.")
+    (d / "2014-06-01.txt").write_text("Second entry.")
+    (d / "2015-07-02.txt").write_text("Third entry.")
+    ingest_mod.ingest_dir(str(d))
+    tbl = store.open_or_create()
+
+    listing = store.list_entries(tbl)
+    assert len(listing) == 3
+    assert set(listing.columns) >= {"entry_id", "date", "date_source", "chunks"}
+
+    # Remove one by id.
+    n = store.delete_entries(tbl, ["2014-06-01.txt"])
+    assert n == 1
+    assert _entries(tbl)[0] == 2
+    assert "2014-06-01.txt" not in store.list_entries(tbl)["entry_id"].tolist()
+
+
+def test_remove_by_date_range(fresh_db):
+    d = fresh_db / "journals"
+    d.mkdir()
+    (d / "2013-05-04.txt").write_text("Old entry.")
+    (d / "2019-06-01.txt").write_text("Mid entry.")
+    (d / "2024-07-02.txt").write_text("Recent entry.")
+    ingest_mod.ingest_dir(str(d))
+    tbl = store.open_or_create()
+
+    ids = store.entry_ids_in_range(tbl, "2018-01-01", "2020-12-31")
+    assert ids == ["2019-06-01.txt"]
+    store.delete_entries(tbl, ids)
+    assert _entries(tbl)[0] == 2
+
+
+def test_delete_all(fresh_db):
+    ingest_mod.ingest_paste("Something to delete.", "2020-01-01")
+    tbl = store.open_or_create()
+    assert _entries(tbl)[0] == 1
+    tbl = store.delete_all(tbl)
+    assert store.count_rows(tbl) == 0

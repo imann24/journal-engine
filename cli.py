@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from journal import config
+from journal import config, store
 from journal.enrich import enrich
 from journal.ingest import ingest_dir
 from journal.rag import ask
@@ -50,7 +50,7 @@ def cmd_enrich(args) -> None:
     def progress(n, total):
         if n % 10 == 0 or n == total:
             print(f"  {n}/{total} entries")
-    n = enrich(limit=args.limit, progress=progress)
+    n = enrich(limit=args.limit, progress=progress, model=args.model)
     print("Nothing to enrich." if n == 0 else f"Enriched {n} entries.")
 
 
@@ -67,7 +67,7 @@ def cmd_search(args) -> None:
 
 def cmd_ask(args) -> None:
     ans = ask(args.question, k=args.k,
-              date_from=args.date_from, date_to=args.date_to)
+              date_from=args.date_from, date_to=args.date_to, model=args.model)
     print(ans.text)
     if ans.cited_dates:
         print(f"\n— drawn from entries dated: {', '.join(ans.cited_dates)}")
@@ -75,6 +75,50 @@ def cmd_ask(args) -> None:
 
 def cmd_stats(_args) -> None:
     print_stats()
+
+
+def cmd_list(_args) -> None:
+    df = store.list_entries(store.open_or_create())
+    if df.empty:
+        print("No entries indexed.")
+        return
+    print(f"{len(df)} entries:\n")
+    for _, r in df.iterrows():
+        print(f"  {r['date']}  [{r['date_source']:>8}]  {r['chunks']:>2} chunk(s)  "
+              f"{r['entry_id']}")
+
+
+def cmd_remove(args) -> None:
+    tbl = store.open_or_create()
+
+    if args.all:
+        if not args.yes and input("Delete ALL entries? type 'yes' to confirm: ").strip() != "yes":
+            print("Aborted.")
+            return
+        store.delete_all(tbl)
+        print("Deleted all entries.")
+        return
+
+    ids = list(args.entry_ids)
+    if args.date_from or args.date_to:
+        ids += store.entry_ids_in_range(tbl, args.date_from, args.date_to)
+    ids = sorted(set(i for i in ids if i))
+
+    if not ids:
+        print("Nothing to remove. Pass entry id(s), --from/--to, or --all. "
+              "Use `list` to see entry ids.")
+        return
+
+    print(f"About to remove {len(ids)} entr{'y' if len(ids) == 1 else 'ies'}:")
+    for i in ids[:20]:
+        print(f"  - {i}")
+    if len(ids) > 20:
+        print(f"  ... and {len(ids) - 20} more")
+    if not args.yes and input("Confirm? type 'yes': ").strip() != "yes":
+        print("Aborted.")
+        return
+    n = store.delete_entries(tbl, ids)
+    print(f"Removed {n} entries.")
 
 
 def cmd_watch(args) -> None:
@@ -92,6 +136,7 @@ def main() -> None:
 
     pe = sub.add_parser("enrich", help="LLM tagging pass for analytics (resumable)")
     pe.add_argument("--limit", type=int, default=None)
+    pe.add_argument("--model", default=None, help="Ollama model tag (overrides default)")
     pe.set_defaults(func=cmd_enrich)
 
     ps = sub.add_parser("search", help="hybrid retrieval, show raw hits")
@@ -106,10 +151,24 @@ def main() -> None:
     pa.add_argument("-k", type=int, default=8)
     pa.add_argument("--from", dest="date_from", default=None)
     pa.add_argument("--to", dest="date_to", default=None)
+    pa.add_argument("--model", default=None, help="Ollama model tag (overrides default)")
     pa.set_defaults(func=cmd_ask)
 
     pst = sub.add_parser("stats", help="temporal + thematic analytics")
     pst.set_defaults(func=cmd_stats)
+
+    pl = sub.add_parser("list", help="list indexed entries and their ids")
+    pl.set_defaults(func=cmd_list)
+
+    prm = sub.add_parser("remove", help="remove entries by id, date range, or all")
+    prm.add_argument("entry_ids", nargs="*", help="entry id(s) to remove (see `list`)")
+    prm.add_argument("--from", dest="date_from", default=None,
+                     help="remove entries on/after this date (YYYY-MM-DD)")
+    prm.add_argument("--to", dest="date_to", default=None,
+                     help="remove entries on/before this date (YYYY-MM-DD)")
+    prm.add_argument("--all", action="store_true", help="remove ALL entries")
+    prm.add_argument("--yes", "-y", action="store_true", help="skip confirmation")
+    prm.set_defaults(func=cmd_remove)
 
     pw = sub.add_parser("watch", help="auto-ingest the drop folder on change")
     pw.add_argument("drop_dir", nargs="?", default=None)
