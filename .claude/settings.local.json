@@ -15,7 +15,8 @@
       "Bash(ollama pull *)",
       "Bash(.venv/bin/python -m pip install -q lancedb ollama python-dateutil pandas streamlit plotly watchdog pyarrow pytest)",
       "Bash(.venv/bin/python -c \"import lancedb,ollama,streamlit,plotly,watchdog,pyarrow,pandas,dateutil; print\\('imports OK'\\)\")",
-      "Bash(.venv/bin/python -c \"import lancedb; print\\('lancedb', lancedb.__version__\\)\")"
+      "Bash(.venv/bin/python -c \"import lancedb; print\\('lancedb', lancedb.__version__\\)\")",
+      "Bash(git *)"
     ]
   }
 }
