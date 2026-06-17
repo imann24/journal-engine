@@ -13,7 +13,7 @@ tailnet-only; never expose it publicly.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import extra_streamlit_components as stx
 import pandas as pd
@@ -21,7 +21,7 @@ import plotly.express as px
 import streamlit as st
 
 # config.load_dotenv() runs on import, populating JOURNAL_PASSWORD et al.
-from journal import config, ingest as ingest_mod, llm, store
+from journal import config, ingest as ingest_mod, llm, store, conversations
 from journal.webauth import COOKIE_NAME, auth_token, verify_password, verify_token
 from journal.enrich import enrich, pending_entries
 from journal.rag import ask
@@ -40,6 +40,9 @@ from journal.stats import (
 )
 
 st.set_page_config(page_title="Journal Engine", page_icon="📓", layout="wide")
+
+# Initialize conversations database
+conversations.init_db()
 
 
 # --------------------------------------------------------------------------- #
@@ -152,7 +155,7 @@ def show_ingest_result(summary) -> None:
     )
     df = summary_to_df(summary)
     if not df.empty:
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width="stretch", hide_index=True)
     frac = summary.mtime_fraction()
     if frac > config.MTIME_WARN_FRACTION:
         st.warning(
@@ -215,7 +218,7 @@ with st.sidebar:
             pass  # cookie may already be absent
         st.rerun()
 
-tab_add, tab_dash, tab_query = st.tabs(["➕ Add entries", "📊 Analysis", "💬 Query"])
+tab_add, tab_manage, tab_dash, tab_query = st.tabs(["➕ Add entries", "📂 Manage entries", "📊 Analysis", "💬 Query"])
 
 
 # --------------------------------------------------------------------------- #
@@ -286,45 +289,201 @@ with tab_add:
             else:
                 st.warning("No files selected.")
 
-    # --- Manage / remove entries ------------------------------------------ #
-    st.divider()
-    with st.expander("🗑️ Manage / remove entries"):
-        tbl = get_table()
+# --------------------------------------------------------------------------- #
+# 2. Manage entries
+# --------------------------------------------------------------------------- #
+with tab_manage:
+    st.subheader("Manage and View Entries")
+
+    tbl = get_table()
+    try:
+        df_all = store.table_to_df(tbl)
+    except Exception:
+        df_all = pd.DataFrame()
+
+    if df_all.empty:
+        st.info("No entries indexed yet. Go to the **Add entries** tab to add your first journal entry!")
+    else:
         entries = store.list_entries(tbl)
-        if entries.empty:
-            st.caption("No entries indexed yet.")
-        else:
-            st.caption(f"{len(entries)} entries indexed.")
-            st.dataframe(entries, use_container_width=True, hide_index=True)
 
-            picked = st.multiselect(
-                "Select entries to remove",
-                options=entries["entry_id"].tolist(),
+        # Two-column layout: Left is the list/search/controls, Right is the details view
+        col_list, col_detail = st.columns([2, 3])
+
+        with col_list:
+            st.markdown("### 📋 Entries List")
+            search_query = st.text_input(
+                "🔍 Search entries",
+                placeholder="Type to filter by text, date, source...",
+                key="manage_search",
             )
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("Remove selected", disabled=not picked, type="primary"):
-                    store.delete_entries(tbl, picked)
-                    st.rerun()
-            with c2:
-                confirm_all = st.checkbox("I'm sure — delete everything")
-                if st.button("Remove ALL entries", disabled=not confirm_all):
-                    store.delete_all(tbl)
+
+            filtered_entries = entries.copy()
+            if search_query:
+                # Find entry IDs that match text content or metadata fields
+                matching_ids = df_all[df_all["text"].str.contains(search_query, case=False, na=False)]["entry_id"].unique()
+                meta_match = (
+                    entries["entry_id"].str.contains(search_query, case=False, na=False) |
+                    entries["date"].str.contains(search_query, case=False, na=False) |
+                    entries["source"].str.contains(search_query, case=False, na=False)
+                )
+                filtered_entries = entries[entries["entry_id"].isin(matching_ids) | meta_match]
+
+            st.caption(f"Showing {len(filtered_entries)} of {len(entries)} entries")
+
+            # Interactive selection dataframe
+            event = st.dataframe(
+                filtered_entries,
+                width="stretch",
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="entries_dataframe",
+            )
+
+            # Action controls in an expander
+            st.markdown("---")
+            with st.expander("🗑️ Entry Removal Tools", expanded=False):
+                selected_rows = event.selection.get("rows", []) if event else []
+                selected_entry_id = None
+                if selected_rows:
+                    selected_entry_id = filtered_entries.iloc[selected_rows[0]]["entry_id"]
+
+                # Option 1: Remove currently selected
+                st.markdown("**Delete Selected**")
+                if st.button("Delete selected entry", disabled=not selected_entry_id, type="primary", key="del_sel_btn"):
+                    store.delete_entries(tbl, [selected_entry_id])
+                    st.toast(f"Deleted entry: {selected_entry_id}")
                     st.rerun()
 
-            st.markdown("**Remove by date range**")
-            d1, d2, d3 = st.columns([2, 2, 1])
-            with d1:
-                rm_from = st.text_input("From", placeholder="2019-01-01", key="rm_from")
-            with d2:
-                rm_to = st.text_input("To", placeholder="2019-12-31", key="rm_to")
-            with d3:
-                st.write("")
-                st.write("")
-                if st.button("Remove range", disabled=not (rm_from or rm_to)):
-                    ids = store.entry_ids_in_range(tbl, rm_from or None, rm_to or None)
-                    store.delete_entries(tbl, ids)
+                st.divider()
+
+                # Option 2: Remove specific chosen entries
+                st.markdown("**Remove by ID selection**")
+                picked = st.multiselect(
+                    "Select entries to remove",
+                    options=entries["entry_id"].tolist(),
+                    key="manage_multiselect",
+                )
+                if st.button("Remove selected by ID", disabled=not picked, key="manage_remove_picked"):
+                    store.delete_entries(tbl, picked)
+                    st.toast(f"Removed {len(picked)} entries.")
                     st.rerun()
+
+                st.divider()
+
+                # Option 3: Remove by date range
+                st.markdown("**Remove by date range**")
+                d1, d2 = st.columns(2)
+                with d1:
+                    rm_from = st.text_input("From (YYYY-MM-DD)", placeholder="2019-01-01", key="rm_from_m")
+                with d2:
+                    rm_to = st.text_input("To (YYYY-MM-DD)", placeholder="2019-12-31", key="rm_to_m")
+                if st.button("Remove range", disabled=not (rm_from or rm_to), key="manage_remove_range"):
+                    ids = store.entry_ids_in_range(tbl, rm_from or None, rm_to or None)
+                    if ids:
+                        store.delete_entries(tbl, ids)
+                        st.toast(f"Removed {len(ids)} entries in date range.")
+                        st.rerun()
+                    else:
+                        st.warning("No entries found in that range.")
+
+                st.divider()
+
+                # Option 4: Delete ALL
+                st.markdown("**Danger Zone**")
+                confirm_all = st.checkbox("I'm sure — delete everything", key="manage_confirm_all")
+                if st.button("Remove ALL entries", disabled=not confirm_all, key="manage_remove_all"):
+                    store.delete_all(tbl)
+                    st.toast("Database cleared successfully.")
+                    st.rerun()
+
+        with col_detail:
+            selected_rows = event.selection.get("rows", []) if event else []
+            if selected_rows:
+                sel_row = filtered_entries.iloc[selected_rows[0]]
+                entry_id = sel_row["entry_id"]
+
+                # Fetch complete content and meta
+                entry_chunks = df_all[df_all["entry_id"] == entry_id].sort_values("chunk_index")
+                full_text = "\n".join(entry_chunks["text"].tolist())
+
+                first_chunk = entry_chunks.iloc[0]
+                date = first_chunk["date"]
+                date_source = first_chunk["date_source"]
+                source = first_chunk["source"]
+                enriched = first_chunk.get("enriched", False)
+                mood = first_chunk.get("mood", 0)
+                topics = first_chunk.get("topics", "")
+                places = first_chunk.get("places", "")
+                people = first_chunk.get("people", "")
+
+                st.markdown(f"### 📖 Entry Details")
+                st.markdown(f"#### `{entry_id}`")
+
+                # Metadata metrics row
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Date", date, help=f"Source: {date_source}")
+                m2.metric("Source", os.path.basename(source) if "/" in source or "\\" in source else source)
+                total_words = int(entry_chunks["word_count"].sum())
+                m3.metric("Length", f"{total_words} words", help=f"Stored in {len(entry_chunks)} database chunks")
+
+                st.divider()
+
+                # AI Enrichment details if available
+                if enriched:
+                    st.markdown("#### ✨ AI Insights")
+
+                    mood_map = {
+                        1: "😢 Very Low",
+                        2: "🙁 Low",
+                        3: "😐 Neutral",
+                        4: "🙂 High",
+                        5: "😀 Very High"
+                    }
+                    mood_str = mood_map.get(mood, f"Unknown ({mood})")
+
+                    # Columns for mood and entities
+                    e1, e2 = st.columns([1, 2])
+                    with e1:
+                        st.metric("Mood Rating", mood_str)
+
+                    with e2:
+                        def parse_list(val):
+                            if not val or val.strip().lower() in ("none", "null", "[]"):
+                                return []
+                            return [v.strip() for v in val.split(",") if v.strip()]
+
+                        topics_list = parse_list(topics)
+                        people_list = parse_list(people)
+                        places_list = parse_list(places)
+
+                        if topics_list:
+                            st.markdown(f"**Topics:** {', '.join([f'`{t}`' for t in topics_list])}")
+                        if people_list:
+                            st.markdown(f"**People:** {', '.join([f'`{p}`' for p in people_list])}")
+                        if places_list:
+                            st.markdown(f"**Places:** {', '.join([f'`{p}`' for p in places_list])}")
+
+                        if not (topics_list or people_list or places_list):
+                            st.caption("No specific topics, people, or places identified.")
+
+                    st.divider()
+                else:
+                    st.info("💡 This entry hasn't been enriched yet. Run enrichment in the **Analysis** tab to extract mood, topics, people, and places.")
+                    st.divider()
+
+                # Full entry text
+                st.markdown("#### 📝 Content")
+                st.text_area(
+                    "Read-only View",
+                    value=full_text,
+                    height=450,
+                    disabled=True,
+                    label_visibility="collapsed"
+                )
+            else:
+                st.markdown("### 📖 Entry Details")
+                st.info("👈 Select an entry from the list on the left to view its full content, metadata, and AI enrichment insights.")
 
 
 # --------------------------------------------------------------------------- #
@@ -380,7 +539,7 @@ with tab_dash:
                     labels={"x": "Year", "y": "Entries"},
                     title="Entries per year",
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
         with c2:
             if has_enrichment(entries):
                 mood = mean_mood_per_year(entries)
@@ -391,7 +550,7 @@ with tab_dash:
                         title="Mean mood per year",
                     )
                     fig.update_yaxes(range=[1, 5])
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
             else:
                 st.info("Run enrichment to see mood and people/place/topic charts.")
 
@@ -413,7 +572,7 @@ with tab_dash:
                             labels={"x": "Mentions", "y": ""},
                         )
                         fig.update_yaxes(autorange="reversed")
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
 
         insights = insight_frame(entries)
         if not insights.empty:
@@ -447,7 +606,7 @@ with tab_dash:
                         labels={"x": "Mentions", "y": ""},
                     )
                     fig.update_yaxes(autorange="reversed")
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
             with s2:
                 st.markdown("**Needs and values**")
                 if needs.empty:
@@ -458,7 +617,7 @@ with tab_dash:
                         labels={"x": "Mentions", "y": ""},
                     )
                     fig.update_yaxes(autorange="reversed")
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
 
             matrix = year_signal_matrix(insights)
             if not matrix.empty and len(matrix) > 1:
@@ -468,7 +627,7 @@ with tab_dash:
                     labels={"x": "Year", "y": "Signal", "color": "Per 100 words"},
                     title="Signal weather by year",
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
             tm = topic_mood(entries)
             if not tm.empty:
@@ -484,7 +643,7 @@ with tab_dash:
                 )
                 fig.update_yaxes(range=[1, 5])
                 fig.update_traces(textposition="top center")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
             prompts = reflective_prompts(entries, insights)
             if prompts:
@@ -496,51 +655,196 @@ with tab_dash:
 # --------------------------------------------------------------------------- #
 # 3. Query (RAG chat)
 # --------------------------------------------------------------------------- #
+def date_from_string(d_str: str | None) -> date | None:
+    if not d_str:
+        return None
+    try:
+        return datetime.strptime(d_str, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
 with tab_query:
     st.subheader("Query your journal")
-    qc = st.columns(3)
-    with qc[0]:
-        q_from_date = st.date_input("From (optional)", value=None)
-        q_from = q_from_date.isoformat() if q_from_date else None
-    with qc[1]:
-        q_to_date = st.date_input("To (optional)", value=None)
-        q_to = q_to_date.isoformat() if q_to_date else None
-    with qc[2]:
-        q_k = st.number_input("Excerpts to retrieve", 1, 30, 8)
 
+    # Initialize session state variables for conversations
+    if "active_conv_id" not in st.session_state:
+        st.session_state["active_conv_id"] = None
+    if "persist_active" not in st.session_state:
+        st.session_state["persist_active"] = False
+    if "q_from_date" not in st.session_state:
+        st.session_state["q_from_date"] = None
+    if "q_to_date" not in st.session_state:
+        st.session_state["q_to_date"] = None
+    if "q_k" not in st.session_state:
+        st.session_state["q_k"] = 8
     if "chat" not in st.session_state:
         st.session_state["chat"] = []
 
-    for msg in st.session_state["chat"]:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            if msg.get("excerpts"):
-                with st.expander("Cited excerpts"):
-                    for h in msg["excerpts"]:
-                        st.markdown(f"**[{h['date']}]** · `{h['entry_id']}`")
-                        st.text(h["text"][:1200])
+    # Two-column layout: Left = Saved Chats history list, Right = Active Chat window & settings
+    col_history, col_chat = st.columns([1, 3])
 
-    prompt = st.chat_input("Ask about your journal…")
-    if prompt:
-        st.session_state["chat"].append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
-        with st.chat_message("assistant"):
-            with st.spinner("Retrieving and reasoning…"):
-                ans = ask(
-                    prompt, k=int(q_k),
-                    date_from=q_from or None, date_to=q_to or None,
-                    tbl=get_table(), model=selected_model(),
+    with col_history:
+        st.write("### 💬 Saved Chats")
+        if st.button("➕ New Chat", width="stretch"):
+            st.session_state["active_conv_id"] = None
+            st.session_state["chat"] = []
+            st.session_state["q_from_date"] = None
+            st.session_state["q_to_date"] = None
+            st.session_state["q_k"] = 8
+            st.session_state["persist_active"] = False
+            st.rerun()
+
+        st.divider()
+
+        # List saved conversations
+        saved_convs = conversations.list_conversations()
+        active_id = st.session_state["active_conv_id"]
+
+        if not saved_convs:
+            st.caption("No saved conversations yet.")
+        else:
+            for c in saved_convs:
+                is_active = (c["id"] == active_id)
+                btn_label = f"💬 {c['title']}" if is_active else c["title"]
+                if st.button(
+                    btn_label,
+                    key=f"select_conv_{c['id']}",
+                    width="stretch",
+                    type="primary" if is_active else "secondary"
+                ):
+                    st.session_state["active_conv_id"] = c["id"]
+                    loaded = conversations.get_conversation(c["id"])
+                    if loaded:
+                        st.session_state["chat"] = loaded["messages"]
+                        st.session_state["q_from_date"] = date_from_string(loaded["date_from"])
+                        st.session_state["q_to_date"] = date_from_string(loaded["date_to"])
+                        st.session_state["q_k"] = loaded["k"]
+                        st.session_state["persist_active"] = True
+                    st.rerun()
+
+        if active_id:
+            st.divider()
+            st.write("### ⚙️ Chat Settings")
+            active_conv = next((c for c in saved_convs if c["id"] == active_id), None)
+            if active_conv:
+                # Rename text input
+                new_title = st.text_input("Rename title", value=active_conv["title"], key="rename_title_input")
+                if new_title and new_title != active_conv["title"]:
+                    conversations.rename_conversation(active_id, new_title)
+                    st.toast("Conversation renamed!")
+                    st.rerun()
+
+                # Delete button
+                if st.button("🗑️ Delete conversation", type="primary", width="stretch"):
+                    conversations.delete_conversation(active_id)
+                    st.session_state["active_conv_id"] = None
+                    st.session_state["chat"] = []
+                    st.session_state["q_from_date"] = None
+                    st.session_state["q_to_date"] = None
+                    st.session_state["q_k"] = 8
+                    st.session_state["persist_active"] = False
+                    st.toast("Conversation deleted.")
+                    st.rerun()
+
+    with col_chat:
+        st.write("### 🔍 Query Options")
+        qc = st.columns(3)
+        with qc[0]:
+            q_from_date = st.date_input("From (optional)", value=st.session_state["q_from_date"])
+            st.session_state["q_from_date"] = q_from_date
+            q_from = q_from_date.isoformat() if q_from_date else None
+        with qc[1]:
+            q_to_date = st.date_input("To (optional)", value=st.session_state["q_to_date"])
+            st.session_state["q_to_date"] = q_to_date
+            q_to = q_to_date.isoformat() if q_to_date else None
+        with qc[2]:
+            q_k = st.number_input("Excerpts to retrieve", 1, 30, value=st.session_state["q_k"])
+            st.session_state["q_k"] = q_k
+
+        active_id = st.session_state["active_conv_id"]
+
+        # Option to persist/save this conversation
+        if active_id:
+            st.info("💾 This conversation is currently being saved to the persistent store.")
+            persist_active = True
+        else:
+            persist_active = st.checkbox(
+                "💾 Save this conversation",
+                value=st.session_state.get("persist_active", False),
+                help="If checked, this chat and its future queries will be stored locally so you can revisit them later."
+            )
+            st.session_state["persist_active"] = persist_active
+
+        st.divider()
+
+        # Display conversation messages
+        for msg in st.session_state["chat"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+                if msg.get("excerpts"):
+                    with st.expander("Cited excerpts"):
+                        for h in msg["excerpts"]:
+                            st.markdown(f"**[{h['date']}]** · `{h['entry_id']}`")
+                            st.text(h["text"][:1200])
+
+        prompt = st.chat_input("Ask about your journal…")
+        if prompt:
+            st.session_state["chat"].append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
+            # If checked and not yet saved in SQLite, initialize it
+            if st.session_state["persist_active"]:
+                if not active_id:
+                    import uuid
+                    active_id = str(uuid.uuid4())
+                    st.session_state["active_conv_id"] = active_id
+                    title = prompt[:40] + ("..." if len(prompt) > 40 else "")
+                else:
+                    conv_info = conversations.get_conversation(active_id)
+                    title = conv_info["title"] if conv_info else (prompt[:40] + ("..." if len(prompt) > 40 else ""))
+
+                conversations.save_conversation(
+                    conversation_id=active_id,
+                    title=title,
+                    date_from=q_from,
+                    date_to=q_to,
+                    k=int(q_k),
+                    messages=st.session_state["chat"]
                 )
-            body = ans.text
-            if ans.cited_dates:
-                body += f"\n\n*— entries dated: {', '.join(ans.cited_dates)}*"
-            st.markdown(body)
-            if ans.excerpts:
-                with st.expander("Cited excerpts"):
-                    for h in ans.excerpts:
-                        st.markdown(f"**[{h['date']}]** · `{h['entry_id']}`")
-                        st.text(h["text"][:1200])
-        st.session_state["chat"].append(
-            {"role": "assistant", "content": body, "excerpts": ans.excerpts}
-        )
+
+            with st.chat_message("assistant"):
+                with st.spinner("Retrieving and reasoning…"):
+                    ans = ask(
+                        prompt, k=int(q_k),
+                        date_from=q_from or None, date_to=q_to or None,
+                        tbl=get_table(), model=selected_model(),
+                    )
+                body = ans.text
+                if ans.cited_dates:
+                    body += f"\n\n*— entries dated: {', '.join(ans.cited_dates)}*"
+                st.markdown(body)
+                if ans.excerpts:
+                    with st.expander("Cited excerpts"):
+                        for h in ans.excerpts:
+                            st.markdown(f"**[{h['date']}]** · `{h['entry_id']}`")
+                            st.text(h["text"][:1200])
+
+            st.session_state["chat"].append(
+                {"role": "assistant", "content": body, "excerpts": ans.excerpts}
+            )
+
+            # Save the new response if persisting is enabled
+            if st.session_state["persist_active"]:
+                conv_info = conversations.get_conversation(active_id)
+                title = conv_info["title"] if conv_info else (prompt[:40] + ("..." if len(prompt) > 40 else ""))
+                conversations.save_conversation(
+                    conversation_id=active_id,
+                    title=title,
+                    date_from=q_from,
+                    date_to=q_to,
+                    k=int(q_k),
+                    messages=st.session_state["chat"]
+                )
+
+            st.rerun()
