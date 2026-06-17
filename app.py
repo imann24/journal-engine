@@ -44,24 +44,6 @@ st.set_page_config(page_title="Journal Engine", page_icon="📓", layout="wide")
 # Initialize conversations database
 conversations.init_db()
 
-# Custom CSS to override the primary accent color to a soft blue.
-# This keeps automatic dark/light mode detection fully functional.
-st.markdown(
-    """
-    <style>
-    :root {
-        --primary-color: #3b82f6;
-        --st-primary-color: #3b82f6;
-    }
-    .stApp {
-        --primary-color: #3b82f6;
-        --st-primary-color: #3b82f6;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
 
 # --------------------------------------------------------------------------- #
 # Auth gate — constant-time password check, persisted per-browser via a signed

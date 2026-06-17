@@ -5,6 +5,14 @@
 # No telemetry, ever. This is the most personal data the user owns.
 gatherUsageStats = false
 
+[theme.light]
+# Blue accent while preserving Streamlit's switchable light mode.
+primaryColor = "#2563eb"
+
+[theme.dark]
+# Slightly brighter blue for contrast in dark mode.
+primaryColor = "#60a5fa"
+
 [server]
 headless = true
 # Bind is set via CLI flags in run_web.sh; these are safe fallbacks.
