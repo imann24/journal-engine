@@ -1,9 +1,9 @@
 # Journal Engine
 
-A fully local ingestion / query / analysis system for ~12 years of plain-text
-journal entries, with a web UI. Runs entirely on the DGX Spark — LanceDB for
+A fully local ingestion / query / analysis system for years of plain-text
+journal entries, with a web UI. Runs entirely on your local machine — LanceDB for
 storage + full-text search, Ollama (localhost) for embeddings and generation.
-**No cloud, no telemetry, ever.** You reach the UI from your Mac over Tailscale.
+**No cloud, no telemetry, ever.** Reach the UI from any machine on your Tailscale network.
 
 ## What it does
 - **Ingest** `.txt` entries from a directory, a drop folder, pasted text, or
@@ -39,16 +39,13 @@ cp .env.example .env
 # Edit .env and set a strong JOURNAL_PASSWORD. .env is gitignored — never commit it.
 ```
 
-## Run the web UI (reach it from your Mac over Tailscale)
+## Run the web UI
 ```bash
 ./run_web.sh
 ```
 It binds to `JOURNAL_WEB_HOST` (default `0.0.0.0`) on `JOURNAL_WEB_PORT`
-(default `8501`) and prints the exact URL. On this Spark that is:
-
-> **http://spark-0d62.tail9e6b2f.ts.net:8501**
-
-Open that from the Mac Studio. The first screen asks for `JOURNAL_PASSWORD`.
+(default `8501`) and prints the exact URL. Open that in any browser on your tailnet.
+The first screen asks for `JOURNAL_PASSWORD`.
 With **Remember this browser** checked, an HMAC-signed cookie keeps you logged in
 across reloads, new tabs, and restarts — you only enter the password once per
 browser. **Log out** clears the cookie. Changing the password (or
@@ -56,8 +53,8 @@ browser. **Log out** clears the cookie. Changing the password (or
 
 **Keep it tailnet-only.** Binding `0.0.0.0` exposes it on every local interface,
 but it should only ever be reachable over your tailnet. Do **not** port-forward it
-or open the port on the Spark's WAN firewall. (To scope it strictly to Tailscale,
-set `JOURNAL_WEB_HOST` to the Spark's Tailscale IP, e.g. `100.81.153.68`.)
+or expose it publicly. (To scope it strictly to Tailscale, set `JOURNAL_WEB_HOST`
+to your machine's Tailscale IP.)
 
 ### Web UI areas
 1. **Add entries** — paste a single entry (optional date; inferred if blank), paste

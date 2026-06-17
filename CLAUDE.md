@@ -3,14 +3,13 @@
 Project context and hard constraints for anyone (human or AI) working on this repo.
 
 ## What this is
-A fully local ingestion / query / analysis engine for ~12 years (2013–present) of
-plain-text journal entries, with a Streamlit web UI. This is the most personal
-data the owner has. **Everything runs locally on one machine. No cloud APIs, no
-telemetry, ever.**
+A fully local ingestion / query / analysis engine for years of plain-text journal
+entries, with a Streamlit web UI. This is the most personal data the owner has.
+**Everything runs locally on one machine. No cloud APIs, no telemetry, ever.**
 
 ## Non-negotiable constraints
-- **Local only.** Embeddings and generation go through Ollama on `localhost`
-  (the DGX Spark). Never add a cloud API client. `OLLAMA_HOST` defaults to
+- **Local only.** Embeddings and generation go through Ollama on `localhost`.
+  Never add a cloud API client. `OLLAMA_HOST` defaults to
   `http://localhost:11434`.
 - **No telemetry.** Streamlit usage stats are disabled in `.streamlit/config.toml`
   and via `STREAMLIT_BROWSER_GATHER_USAGE_STATS=false` in `run_web.sh`. Don't add
@@ -24,8 +23,8 @@ telemetry, ever.**
   (`journal/webauth.py` + `extra-streamlit-components` CookieManager) — the cookie
   holds a token, never the password; changing the password invalidates it. There
   is a logout control that clears the cookie.
-- **Tailnet-only.** The server binds `0.0.0.0:<port>` so the Mac Studio can reach
-  it over Tailscale at the Spark's MagicDNS name. It must never be port-forwarded
+- **Tailnet-only.** The server binds `0.0.0.0:<port>` so other devices can reach
+  it over Tailscale at the machine's MagicDNS name. It must never be port-forwarded
   or exposed to the public internet.
 
 ## Stack (decided — do not relitigate)

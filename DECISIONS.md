@@ -6,9 +6,9 @@ Reasonable choices made during the one-shot build, so they're easy to revisit.
    gives a clean native password gate and the dashboard/chat widgets needed, with
    no extra auth dependency.
 
-2. **Default chat model = `nemotron-3-super:latest`.** You run Nemotron; this is
-   the flagship you have pulled and it fits the Spark's 128 GB unified memory. It's
-   slow for bulk enrichment over 12 years of entries, so the README/`.env` call out
+2. **Default chat model = `nemotron-3-super:latest`.** Nemotron is a capable local
+   model that performs well on hardware with ample VRAM. It can be slow for bulk
+   enrichment over large corpora, so the README/`.env` call out
    `nemotron-3-nano:latest` as the faster option — switch via `JOURNAL_CHAT_MODEL`.
    Retrieval/RAG quality is unaffected by the choice.
 
@@ -35,7 +35,7 @@ Reasonable choices made during the one-shot build, so they're easy to revisit.
    an empty table and ingest the very first entry into a fresh DB. Change
    `JOURNAL_EMBED_DIM` if you swap embedding models.
 
-8. **Bind `0.0.0.0` by default**, as requested, for Tailscale reachability. The
+8. **Bind `0.0.0.0` by default** for Tailscale reachability. The
    README documents keeping it tailnet-only and the stricter option of binding the
    Spark's Tailscale IP directly.
 
