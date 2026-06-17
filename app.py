@@ -417,9 +417,11 @@ with tab_query:
     st.subheader("Query your journal")
     qc = st.columns(3)
     with qc[0]:
-        q_from = st.text_input("From (optional)", placeholder="2019-01-01")
+        q_from_date = st.date_input("From (optional)", value=None)
+        q_from = q_from_date.isoformat() if q_from_date else None
     with qc[1]:
-        q_to = st.text_input("To (optional)", placeholder="2019-12-31")
+        q_to_date = st.date_input("To (optional)", value=None)
+        q_to = q_to_date.isoformat() if q_to_date else None
     with qc[2]:
         q_k = st.number_input("Excerpts to retrieve", 1, 30, 8)
 
