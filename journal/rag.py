@@ -30,6 +30,7 @@ def ask(
     date_from: str | None = None,
     date_to: str | None = None,
     tbl=None,
+    model: str | None = None,
 ) -> Answer:
     hits = hybrid_search(question, k=k, date_from=date_from, date_to=date_to, tbl=tbl)
     if not hits:
@@ -45,6 +46,6 @@ def ask(
         f"JOURNAL EXCERPTS:\n{context}\n\n"
         f"QUESTION: {question}\n\nAnswer, citing entry dates:"
     )
-    text = chat(prompt, system=RAG_SYSTEM)
+    text = chat(prompt, system=RAG_SYSTEM, model=model)
     cited = sorted({h["date"] for h in hits})
     return Answer(text, cited, ordered)

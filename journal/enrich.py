@@ -70,6 +70,7 @@ def enrich(
     limit: int | None = None,
     tbl=None,
     progress: Callable[[int, int], None] | None = None,
+    model: str | None = None,
 ) -> int:
     """Enrich up to `limit` unenriched entries. Returns the number enriched."""
     tbl = tbl or store.open_or_create()
@@ -92,7 +93,7 @@ def enrich(
         rows = df[df["entry_id"] == entry_id].sort_values("chunk_index")
         # Enrich on the whole entry (joined chunks), capped for the prompt.
         full_text = "\n\n".join(rows["text"].tolist())[:6000]
-        meta = _safe_json(chat(full_text, system=ENRICH_SYSTEM))
+        meta = _safe_json(chat(full_text, system=ENRICH_SYSTEM, model=model))
         values = {
             "mood": _clean_mood(meta.get("mood", 3)),
             "topics": _clean_list(meta.get("topics", [])),
