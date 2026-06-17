@@ -255,24 +255,30 @@ with tab_add:
             st.warning("Nothing to ingest.")
 
     else:  # Upload
+        if "upload_key" not in st.session_state:
+            st.session_state["upload_key"] = 0
         uploads = st.file_uploader(
             "Upload one or more .txt files",
             type=["txt"],
             accept_multiple_files=True,
+            key=f"upload_files_{st.session_state['upload_key']}",
         )
-        if st.button("Ingest uploads") and uploads:
-            files = []
-            for uf in uploads:
-                raw = uf.read()
-                try:
-                    text = raw.decode("utf-8")
-                except UnicodeDecodeError:
-                    text = raw.decode("latin-1", errors="replace")
-                files.append((uf.name, text))
-            summary = ingest_mod.ingest_uploads(files, tbl=get_table())
-            show_ingest_result(summary)
-        elif st.session_state.get("_upload_clicked"):
-            st.warning("No files selected.")
+        if st.button("Ingest uploads"):
+            if uploads:
+                files = []
+                for uf in uploads:
+                    raw = uf.read()
+                    try:
+                        text = raw.decode("utf-8")
+                    except UnicodeDecodeError:
+                        text = raw.decode("latin-1", errors="replace")
+                    files.append((uf.name, text))
+                summary = ingest_mod.ingest_uploads(files, tbl=get_table())
+                show_ingest_result(summary)
+                st.session_state["upload_key"] += 1
+                st.rerun()
+            else:
+                st.warning("No files selected.")
 
     # --- Manage / remove entries ------------------------------------------ #
     st.divider()
