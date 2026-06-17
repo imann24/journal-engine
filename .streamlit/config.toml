@@ -13,6 +13,3 @@ port = 8501
 # Keep XSRF protection on (the auth cookie flow relies on it). Leave CORS at its
 # default — disabling it conflicts with XSRF protection.
 enableXsrfProtection = true
-
-[theme]
-primaryColor = "#3b82f6"
