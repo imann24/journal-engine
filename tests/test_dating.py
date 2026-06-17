@@ -62,6 +62,39 @@ def test_compact_8digit_not_matched_inside_longer_run():
     assert date_from_filename("201305041230") is None
 
 
+# --- short / year-last filename dates (e.g. 1.03.25) ---------------------- #
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("1.03.25", date(2025, 1, 3)),          # M.D.YY, US default
+        ("01.03.2025", date(2025, 1, 3)),       # MM.DD.YYYY
+        ("12.31.24", date(2024, 12, 31)),       # M.D.YY end of year
+        ("1-3-25", date(2025, 1, 3)),           # dash separators
+        ("1/3/25", date(2025, 1, 3)),           # slash separators
+        ("journal 3.14.2013 notes", date(2013, 3, 14)),
+        ("13.05.25", date(2025, 5, 13)),        # first>12 -> auto day-first
+        ("25.12.2024", date(2024, 12, 25)),     # day-first, unambiguous
+        ("1.03.99", date(1999, 1, 3)),          # 2-digit year pivot -> 1999
+    ],
+)
+def test_year_last_filename_dates(name, expected):
+    assert date_from_filename(name) == expected
+
+
+def test_dayfirst_toggle(monkeypatch):
+    from journal import config
+    # Ambiguous 03.04.25: US default = Mar 4; day-first = Apr 3.
+    monkeypatch.setattr(config, "DATE_DAYFIRST", False)
+    assert date_from_filename("03.04.25") == date(2025, 3, 4)
+    monkeypatch.setattr(config, "DATE_DAYFIRST", True)
+    assert date_from_filename("03.04.25") == date(2025, 4, 3)
+
+
+def test_short_date_needs_two_digit_year():
+    # 1.3.5 is too ambiguous (1-digit year) and must not match.
+    assert date_from_filename("1.3.5") is None
+
+
 # --- header --------------------------------------------------------------- #
 @pytest.mark.parametrize(
     "body,expected",

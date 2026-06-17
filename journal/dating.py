@@ -19,6 +19,8 @@ from pathlib import Path
 
 from dateutil import parser as dateparser
 
+from . import config
+
 # How many leading lines of the body to scan for a header date.
 HEADER_LINES = 4
 
@@ -27,11 +29,21 @@ HEADER_LINES = 4
 MIN_YEAR = 1990
 MAX_YEAR = 2100
 
-# Filename date patterns, tried in order. Each yields (year, month, day).
-_FILENAME_DATE_RES = [
-    re.compile(r"(\d{4})[-_./](\d{1,2})[-_./](\d{1,2})"),   # 2013-05-04, 2013_5_4
-    re.compile(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)"),       # 20130504 (exactly 8)
-]
+# Filename date patterns, tried in this order:
+#   compact:    exactly 8 digits, YYYYMMDD               (20130504)
+#   year-first: 4-digit year, then 1-2 digit M and D     (2013-05-04, 2013_5_4)
+#   year-last:  1-2 digit X and Y, then 2-4 digit year   (1.03.25, 01/03/2025)
+# Separators are any of . - / _ .
+_FILENAME_COMPACT_RE = re.compile(r"(?<!\d)(\d{4})(\d{2})(\d{2})(?!\d)")
+_FILENAME_YMD_RE = re.compile(r"(?<!\d)(\d{4})[-_./](\d{1,2})[-_./](\d{1,2})(?!\d)")
+_FILENAME_MDY_RE = re.compile(r"(?<!\d)(\d{1,2})[-_./](\d{1,2})[-_./](\d{2,4})(?!\d)")
+
+
+def _normalize_year(y: int) -> int:
+    """Expand a 2-digit year with a 1970–2069 pivot (25 -> 2025, 99 -> 1999)."""
+    if y < 100:
+        return 2000 + y if y <= 69 else 1900 + y
+    return y
 
 # Textual dates allowed in a header line.
 _TEXTUAL_DATE_RE = re.compile(
@@ -56,12 +68,30 @@ def _valid_ymd(y: int, mo: int, d: int) -> date | None:
 
 
 def date_from_filename(name: str) -> date | None:
-    """Extract a date from a filename stem, or None."""
-    for rx in _FILENAME_DATE_RES:
-        m = rx.search(name)
-        if m:
-            y, mo, d = (int(g) for g in m.groups())
-            got = _valid_ymd(y, mo, d)
+    """Extract a date from a filename stem, or None.
+
+    Handles YYYYMMDD, year-first (2013-05-04), and year-last short forms with
+    2- or 4-digit years (1.03.25, 01/03/2025). Ambiguous month/day order
+    defaults to US month-first; flip with JOURNAL_DATE_DAYFIRST.
+    """
+    m = _FILENAME_COMPACT_RE.search(name)
+    if m:
+        got = _valid_ymd(int(m[1]), int(m[2]), int(m[3]))
+        if got:
+            return got
+
+    m = _FILENAME_YMD_RE.search(name)              # YYYY sep M sep D
+    if m:
+        got = _valid_ymd(int(m[1]), int(m[2]), int(m[3]))
+        if got:
+            return got
+
+    m = _FILENAME_MDY_RE.search(name)              # X sep Y sep YY[YY]
+    if m:
+        a, b, year = int(m[1]), int(m[2]), _normalize_year(int(m[3]))
+        orders = [(b, a), (a, b)] if config.DATE_DAYFIRST else [(a, b), (b, a)]
+        for mo, d in orders:
+            got = _valid_ymd(year, mo, d)
             if got:
                 return got
     return None

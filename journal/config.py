@@ -72,3 +72,9 @@ WEB_PORT: int = int(os.environ.get("JOURNAL_WEB_PORT", "8501"))
 
 # Fraction of entries falling back to mtime above which we warn loudly.
 MTIME_WARN_FRACTION: float = float(os.environ.get("JOURNAL_MTIME_WARN", "0.30"))
+
+# For ambiguous numeric dates like 1.03.25, assume day-first (European) instead
+# of the default month-first (US, e.g. 1.03.25 -> Jan 3 2025).
+DATE_DAYFIRST: bool = os.environ.get("JOURNAL_DATE_DAYFIRST", "false").lower() in (
+    "1", "true", "yes",
+)
