@@ -107,8 +107,11 @@ cookie_manager = require_auth()
 # --------------------------------------------------------------------------- #
 # Shared helpers
 # --------------------------------------------------------------------------- #
-@st.cache_resource
 def get_table():
+    # Open a fresh handle each call. A LanceDB table handle is a version
+    # snapshot — caching one across reruns would make reads stale after any
+    # write (and reference dropped data files after a wipe). Opening is cheap
+    # for an embedded DB, so we always read the latest committed state.
     return store.open_or_create()
 
 
@@ -289,14 +292,12 @@ with tab_add:
             c1, c2 = st.columns(2)
             with c1:
                 if st.button("Remove selected", disabled=not picked, type="primary"):
-                    n = store.delete_entries(tbl, picked)
-                    st.success(f"Removed {n} entries.")
+                    store.delete_entries(tbl, picked)
                     st.rerun()
             with c2:
                 confirm_all = st.checkbox("I'm sure — delete everything")
                 if st.button("Remove ALL entries", disabled=not confirm_all):
                     store.delete_all(tbl)
-                    st.success("Deleted all entries.")
                     st.rerun()
 
             st.markdown("**Remove by date range**")
@@ -310,8 +311,7 @@ with tab_add:
                 st.write("")
                 if st.button("Remove range", disabled=not (rm_from or rm_to)):
                     ids = store.entry_ids_in_range(tbl, rm_from or None, rm_to or None)
-                    n = store.delete_entries(tbl, ids)
-                    st.success(f"Removed {n} entries in range.")
+                    store.delete_entries(tbl, ids)
                     st.rerun()
 
 

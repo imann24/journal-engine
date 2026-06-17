@@ -137,3 +137,16 @@ def test_delete_all(fresh_db):
     assert _entries(tbl)[0] == 1
     tbl = store.delete_all(tbl)
     assert store.count_rows(tbl) == 0
+
+
+def test_delete_all_leaves_handle_readable(fresh_db):
+    # Regression: delete_all must keep an already-open handle usable (it used to
+    # drop/recreate the table, so reads on the cached handle hit missing files).
+    tbl = store.open_or_create()
+    ingest_mod.ingest_records(
+        [ingest_mod.EntryRecord(entry_id="e1", body="hello", source="x")], tbl=tbl
+    )
+    store.delete_all(tbl)
+    # Reading the SAME handle must not raise and must show an empty table.
+    assert len(store.list_entries(tbl)) == 0
+    assert store.count_rows(tbl) == 0

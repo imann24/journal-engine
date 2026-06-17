@@ -174,8 +174,19 @@ def delete_entries(tbl, entry_ids) -> int:
 
 
 def delete_all(tbl=None):
-    """Drop and recreate an empty entries table. Returns the fresh table."""
-    db = connect()
-    if config.TABLE in _table_names(db):
-        db.drop_table(config.TABLE)
-    return open_or_create(db)
+    """Remove every entry, in place, keeping the table and schema.
+
+    Deleting rows (rather than dropping/recreating the table) keeps any existing
+    open table handle valid — important because the web UI caches one.
+    """
+    tbl = tbl or open_or_create()
+    try:
+        tbl.delete("true")           # always-true predicate -> delete all rows
+    except Exception:
+        # Fallback for older backends: drop and recreate.
+        db = connect()
+        if config.TABLE in _table_names(db):
+            db.drop_table(config.TABLE)
+        return open_or_create(db)
+    rebuild_fts(tbl)
+    return tbl
