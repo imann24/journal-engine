@@ -28,9 +28,15 @@ from journal.rag import ask
 from journal.stats import (
     entries_per_year,
     has_enrichment,
+    insight_frame,
     load_frame,
     mean_mood_per_year,
+    needs_totals,
+    reflective_prompts,
+    signal_totals,
     top_tokens,
+    topic_mood,
+    year_signal_matrix,
 )
 
 st.set_page_config(page_title="Journal Engine", page_icon="📓", layout="wide")
@@ -408,6 +414,83 @@ with tab_dash:
                         )
                         fig.update_yaxes(autorange="reversed")
                         st.plotly_chart(fig, use_container_width=True)
+
+        insights = insight_frame(entries)
+        if not insights.empty:
+            st.divider()
+            st.markdown("**Mindfulness signals**")
+            st.caption(
+                "Transparent lexical patterns for reflection, not diagnosis. "
+                "Use them as gentle trailheads into the entries."
+            )
+
+            signals = signal_totals(insights)
+            needs = needs_totals(insights)
+            lens = insights["attention_lens"].value_counts()
+            dominant_lens = lens.index[0] if not lens.empty else "reflective"
+            dominant_signal = signals.index[0] if not signals.empty else "quiet"
+            top_need = needs.index[0] if not needs.empty else "space"
+
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Strongest signal", dominant_signal)
+            m2.metric("Attention lens", dominant_lens)
+            m3.metric("Recurring need", top_need)
+
+            s1, s2 = st.columns(2)
+            with s1:
+                st.markdown("**Signal mix**")
+                if signals.empty:
+                    st.caption("Not enough signal words in this range yet.")
+                else:
+                    fig = px.bar(
+                        x=signals.values, y=signals.index, orientation="h",
+                        labels={"x": "Mentions", "y": ""},
+                    )
+                    fig.update_yaxes(autorange="reversed")
+                    st.plotly_chart(fig, use_container_width=True)
+            with s2:
+                st.markdown("**Needs and values**")
+                if needs.empty:
+                    st.caption("No recurring needs surfaced in this range yet.")
+                else:
+                    fig = px.bar(
+                        x=needs.values, y=needs.index, orientation="h",
+                        labels={"x": "Mentions", "y": ""},
+                    )
+                    fig.update_yaxes(autorange="reversed")
+                    st.plotly_chart(fig, use_container_width=True)
+
+            matrix = year_signal_matrix(insights)
+            if not matrix.empty and len(matrix) > 1:
+                fig = px.imshow(
+                    matrix.T,
+                    aspect="auto",
+                    labels={"x": "Year", "y": "Signal", "color": "Per 100 words"},
+                    title="Signal weather by year",
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            tm = topic_mood(entries)
+            if not tm.empty:
+                st.markdown("**Topic mood companions**")
+                fig = px.scatter(
+                    tm.head(20),
+                    x="entries", y="mean_mood", text="topic",
+                    labels={
+                        "entries": "Entries",
+                        "mean_mood": "Mean mood",
+                        "topic": "Topic",
+                    },
+                )
+                fig.update_yaxes(range=[1, 5])
+                fig.update_traces(textposition="top center")
+                st.plotly_chart(fig, use_container_width=True)
+
+            prompts = reflective_prompts(entries, insights)
+            if prompts:
+                st.markdown("**Reflection prompts**")
+                for prompt in prompts:
+                    st.write(f"- {prompt}")
 
 
 # --------------------------------------------------------------------------- #

@@ -63,9 +63,10 @@ to your machine's Tailscale IP.)
    what was ingested and the date source used for each. A **Manage / remove
    entries** panel lists everything indexed and lets you delete entries by
    selection, by date range, or all of them.
-2. **Analysis** — charts for entries/year, mean mood/year, and top
-   people/places/topics, with a date-range filter and a button to run/refresh
-   enrichment.
+2. **Analysis** — charts for entries/year, mean mood/year, top
+   people/places/topics, mindfulness signals, recurring needs/values, topic mood
+   companions, year-by-year signal weather, and gentle reflective prompts, with a
+   date-range filter and a button to run/refresh enrichment.
 3. **Query** — chat-style RAG with optional From/To dates, showing the answer,
    cited entry dates, and the underlying excerpts.
 
