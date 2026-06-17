@@ -129,3 +129,53 @@ def count_rows(tbl) -> int:
         return tbl.count_rows()
     except Exception:
         return 0
+
+
+# --------------------------------------------------------------------------- #
+# Entry management (list / remove)
+# --------------------------------------------------------------------------- #
+def list_entries(tbl):
+    """One row per entry: entry_id, date, date_source, source, chunks.
+    Sorted by date. Returns an empty DataFrame when nothing is indexed."""
+    df = table_to_df(tbl)
+    if df.empty:
+        return df
+    first = (
+        df.sort_values("chunk_index")
+        .groupby("entry_id", as_index=False)
+        .first()[["entry_id", "date", "date_source", "source"]]
+    )
+    counts = df.groupby("entry_id").size().rename("chunks").reset_index()
+    out = first.merge(counts, on="entry_id")
+    return out.sort_values(["date", "entry_id"]).reset_index(drop=True)
+
+
+def entry_ids_in_range(tbl, date_from: str | None = None,
+                       date_to: str | None = None) -> list[str]:
+    df = table_to_df(tbl)
+    if df.empty:
+        return []
+    if date_from:
+        df = df[df["date_int"] >= int(date_from.replace("-", ""))]
+    if date_to:
+        df = df[df["date_int"] <= int(date_to.replace("-", ""))]
+    return sorted(df["entry_id"].unique().tolist())
+
+
+def delete_entries(tbl, entry_ids) -> int:
+    """Delete the given entries (all their chunks) and rebuild the FTS index.
+    Returns the number of entries removed."""
+    ids = [e for e in dict.fromkeys(entry_ids) if e]
+    for eid in ids:
+        delete_entry(tbl, eid)
+    if ids:
+        rebuild_fts(tbl)
+    return len(ids)
+
+
+def delete_all(tbl=None):
+    """Drop and recreate an empty entries table. Returns the fresh table."""
+    db = connect()
+    if config.TABLE in _table_names(db):
+        db.drop_table(config.TABLE)
+    return open_or_create(db)
