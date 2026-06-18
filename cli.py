@@ -77,6 +77,47 @@ def cmd_stats(_args) -> None:
     print_stats()
 
 
+def _build_pass(name: str):
+    """Construct a deterministic pass by CLI name. GoEmotions is pinned to a
+    specific model revision and runs on the GPU (fp16) when available."""
+    from passes.deterministic import GoEmotionsPass, LexicalPass
+
+    if name == "lexical":
+        return LexicalPass()
+    if name == "goemotions":
+        return GoEmotionsPass(revision=config.GOEMOTIONS_REVISION, fp16=True)
+    raise ValueError(f"unknown pass: {name}")
+
+
+def cmd_derive(args) -> None:
+    from journal import signal_store as ss
+
+    store_ = ss.LanceSignalStore()
+
+    if args.aggregate_only:
+        n = ss.aggregate_entries()
+        print(f"Rebuilt entry_signals: {n} rollup rows.")
+        return
+
+    if not args.pass_name:
+        print("Pass --pass {lexical,goemotions} (or --aggregate to rebuild rollups).")
+        return
+
+    chunks = ss.iter_chunks(date_from=args.since)
+    if not chunks:
+        print("No chunks to derive over. Run `ingest` first.")
+        return
+
+    a_pass = _build_pass(args.pass_name)
+    print(f"Deriving '{a_pass.name}' ({a_pass.model_tag}) over {len(chunks)} chunks"
+          + (" [rebuild]" if args.rebuild else "") + " ...")
+    written = store_.run_pass(a_pass, chunks, force=args.rebuild)
+    print(f"Wrote {written} signal rows ({store_.count()} total in store).")
+
+    n = ss.aggregate_entries()
+    print(f"Rebuilt entry_signals: {n} rollup rows.")
+
+
 def cmd_list(_args) -> None:
     df = store.list_entries(store.open_or_create())
     if df.empty:
@@ -156,6 +197,17 @@ def main() -> None:
 
     pst = sub.add_parser("stats", help="temporal + thematic analytics")
     pst.set_defaults(func=cmd_stats)
+
+    pd_ = sub.add_parser("derive", help="run a deterministic signal pass + roll up")
+    pd_.add_argument("--pass", dest="pass_name", choices=["lexical", "goemotions"],
+                     help="which deterministic pass to run")
+    pd_.add_argument("--since", default=None,
+                     help="only derive over chunks dated on/after YYYY-MM-DD")
+    pd_.add_argument("--rebuild", action="store_true",
+                     help="force recompute (ignore already-computed signals)")
+    pd_.add_argument("--aggregate", dest="aggregate_only", action="store_true",
+                     help="only rebuild the entry_signals rollup table")
+    pd_.set_defaults(func=cmd_derive)
 
     pl = sub.add_parser("list", help="list indexed entries and their ids")
     pl.set_defaults(func=cmd_list)

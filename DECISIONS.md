@@ -71,3 +71,37 @@ Reasonable choices made during the one-shot build, so they're easy to revisit.
 15. **Entry removal** is exposed both in the CLI (`list`, `remove` by id / date
     range / `--all`, with confirmation unless `--yes`) and the web UI (Manage
     panel). Deletes are by `entry_id` and rebuild the FTS index afterward.
+
+16. **Versioned signal store between corpus and dashboard.** Derivation used to be
+    coupled to presentation: every new signal meant a column on the `entries`
+    table and a schema change, and a derivation couldn't be re-run in isolation.
+    We inserted a typed, versioned **signal store** (`journal/signal_store.py`,
+    LanceDB tables `signals` + `entry_signals`) fed by deterministic *passes*
+    (`passes/deterministic.py`). Analysis/visualization is now a pure query over
+    that store. See `ANALYSIS.md` for the five-layer design.
+
+    - **Natural key** `(chunk_id, namespace, key)`; `upsert` is last-write-wins
+      (delete-by-predicate then add, like the entries store's changed-entry path).
+    - **Idempotency lives in `PassRunner`**, keyed on `(pass_name, pass_version,
+      chunk content_hash)`. A changed chunk or a bumped pass version re-derives;
+      an unchanged one is skipped. `cli.py derive --rebuild` forces recompute
+      without bumping any version. The signal store reads `has()` from a small
+      in-memory set so a full run is one table scan, not one per chunk.
+    - `pass_name`/`pass_version` are stored as their own columns (the adapter
+      stamps them via `bind_pass`) because neither is recoverable from `model_tag`,
+      which encodes only the lexicon hash / model revision.
+    - **Reproducibility:** the GoEmotions model is pinned to a commit hash
+      (`config.GOEMOTIONS_REVISION`), not `"main"`, so a re-pull can't move the
+      numbers; the lexicons are hashed into the lexical pass's `model_tag`, so any
+      lexicon edit is a new version and re-derives only that pass.
+    - **Deterministic vs LLM signals stay separate.** GoEmotions/lexical are
+      deterministic (fixed weights, lexicon lookups — no sampling). A future LLM
+      pass (`passes/llm_profile.py`, stubbed) must write under its own namespace
+      so non-deterministic signals never mix with these.
+
+17. **spaCy added; transformers/torch optional.** The lexical pass uses spaCy
+    (`en_core_web_sm`) for real verb tense and falls back to a marker-word
+    approximation when it's absent. `transformers`+`torch` are an *optional* GPU
+    extra needed only by the GoEmotions pass (lazy-imported), so the rest of the
+    engine — and the test suite — runs without them. GoEmotions runs on GPU
+    (`device=0`, fp16) when CUDA is available.

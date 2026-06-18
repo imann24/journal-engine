@@ -18,10 +18,12 @@ from datetime import date, datetime, timedelta
 import extra_streamlit_components as stx
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 # config.load_dotenv() runs on import, populating JOURNAL_PASSWORD et al.
 from journal import config, ingest as ingest_mod, llm, store, conversations
+from journal import signal_store as ss
 from journal.webauth import COOKIE_NAME, auth_token, verify_password, verify_token
 from journal.enrich import enrich, pending_entries
 from journal.rag import ask
@@ -218,7 +220,10 @@ with st.sidebar:
             pass  # cookie may already be absent
         st.rerun()
 
-tab_add, tab_manage, tab_dash, tab_query = st.tabs(["➕ Add entries", "📂 Manage entries", "📊 Analysis", "💬 Query"])
+tab_add, tab_manage, tab_dash, tab_emotion, tab_intro, tab_query = st.tabs(
+    ["➕ Add entries", "📂 Manage entries", "📊 Analysis",
+     "🎭 Emotion", "🔍 Introspection", "💬 Query"]
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -239,13 +244,13 @@ with tab_add:
                 placeholder="2019-07-14",
             )
             body = st.text_area("Entry text", height=240)
-            go = st.form_submit_button("Ingest")
-        if go and body.strip():
+            submitted = st.form_submit_button("Ingest")
+        if submitted and body.strip():
             summary = ingest_mod.ingest_paste(
                 body, explicit_date=date_str or None, tbl=get_table()
             )
             show_ingest_result(summary)
-        elif go:
+        elif submitted:
             st.warning("Nothing to ingest — the entry is empty.")
 
     elif mode == "Batch paste":
@@ -256,11 +261,11 @@ with tab_add:
         )
         with st.form("batch"):
             blob = st.text_area("Entries", height=300)
-            go = st.form_submit_button("Ingest batch")
-        if go and blob.strip():
+            submitted = st.form_submit_button("Ingest batch")
+        if submitted and blob.strip():
             summary = ingest_mod.ingest_batch(blob, tbl=get_table())
             show_ingest_result(summary)
-        elif go:
+        elif submitted:
             st.warning("Nothing to ingest.")
 
     else:  # Upload
@@ -650,6 +655,169 @@ with tab_dash:
                 st.markdown("**Reflection prompts**")
                 for prompt in prompts:
                     st.write(f"- {prompt}")
+
+
+# --------------------------------------------------------------------------- #
+# Signal-store tabs (Emotion / Introspection) — query the derived signal store.
+# --------------------------------------------------------------------------- #
+_PERIOD_FREQ = {"Month": "M", "Quarter": "Q", "Year": "Y"}
+_META_COLS = {"entry_id", "date", "date_int", "dt", "period"}
+
+
+def _signals_gate(kind: str):
+    """Return (n_entries, enough_for_trends). Renders an info/warning when sparse
+    so we never imply precision on thin history."""
+    n = ss.signal_entry_count()
+    if n == 0:
+        st.info(
+            f"No derived signals yet. Generate them locally with "
+            f"`python cli.py derive --pass {kind}` (one-time, then incremental)."
+        )
+        return 0, False
+    enough = n >= config.MIN_SIGNAL_ENTRIES
+    if not enough:
+        st.warning(
+            f"Only **{n}** entries have derived signals (≥ "
+            f"{config.MIN_SIGNAL_ENTRIES} recommended before reading trends). "
+            "Per-entry views are shown; time-trends are hidden to avoid implying "
+            "precision on sparse history."
+        )
+    return n, enough
+
+
+def _grouped_means(wide: pd.DataFrame, freq: str):
+    """Period-group a per-entry wide frame -> (mean-per-column, entries-per-period)."""
+    d = wide.copy()
+    d["dt"] = pd.to_datetime(d["date"], errors="coerce")
+    d = d.dropna(subset=["dt"])
+    if d.empty:
+        return pd.DataFrame(), pd.Series(dtype=int)
+    d["period"] = d["dt"].dt.to_period(freq).dt.to_timestamp()
+    cols = [c for c in d.columns if c not in _META_COLS]
+    counts = d.groupby("period").size()
+    return d.groupby("period")[cols].mean(), counts
+
+
+with tab_emotion:
+    st.subheader("Emotion")
+    st.caption(
+        "28-label GoEmotions vectors (a multi-label classifier at a pinned "
+        "revision — deterministic, not a mood score). Entries carry several "
+        "emotions at once; nothing is collapsed to a single feeling."
+    )
+    n_emo, emo_enough = _signals_gate("goemotions")
+    emo = ss.emotion_entry_wide(which="mean") if n_emo else pd.DataFrame()
+    if emo.empty:
+        st.info("No emotion signals found. Run `python cli.py derive --pass goemotions`.")
+    else:
+        label_cols = [c for c in emo.columns if c not in _META_COLS]
+
+        st.markdown("**Per-entry emotion fingerprint**")
+        options = emo["date"] + "  ·  " + emo["entry_id"]
+        pick = st.selectbox("Entry", options.tolist(), index=len(options) - 1)
+        sel = emo.iloc[options.tolist().index(pick)]
+        vals = [float(sel[c]) for c in label_cols]
+        radar = go.Figure(
+            go.Scatterpolar(
+                r=vals + vals[:1],
+                theta=list(label_cols) + [label_cols[0]],
+                fill="toself",
+                name="mean",
+            )
+        )
+        radar.update_layout(
+            polar={"radialaxis": {"visible": True, "range": [0, max(vals) or 1]}},
+            showlegend=False,
+            title="Emotion radar (length-weighted mean over the entry's chunks)",
+        )
+        st.plotly_chart(radar, width="stretch")
+
+        st.divider()
+        st.markdown("**Emotion over time**")
+        if not emo_enough:
+            st.caption("Trend hidden until more entries are derived.")
+        else:
+            freq_label = st.radio("Group by", list(_PERIOD_FREQ), horizontal=True,
+                                  index=0, key="emo_freq")
+            grouped, counts = _grouped_means(emo, _PERIOD_FREQ[freq_label])
+            if grouped.empty:
+                st.caption("Not enough dated entries to chart.")
+            else:
+                # Top emotions overall keep the stacked area readable.
+                top = grouped.mean().sort_values(ascending=False).head(8).index.tolist()
+                area = grouped[top].reset_index().melt(
+                    id_vars="period", var_name="emotion", value_name="score"
+                )
+                fig = px.area(
+                    area, x="period", y="score", color="emotion",
+                    labels={"period": "", "score": "Mean intensity"},
+                    title=f"Top-8 emotions by {freq_label.lower()}",
+                )
+                st.plotly_chart(fig, width="stretch")
+                st.caption(
+                    "Entries per period: "
+                    + ", ".join(f"{p:%Y-%m}: {c}" for p, c in counts.items())
+                )
+
+
+with tab_intro:
+    st.subheader("Introspection")
+    st.caption(
+        "Transparent psycholinguistic rates (lexicon lookups + real verb tense), "
+        "not clinical measures. Reflective trailheads, not diagnoses."
+    )
+    n_lex, lex_enough = _signals_gate("lexical")
+    lex = ss.lexical_entry_wide() if n_lex else pd.DataFrame()
+    if lex.empty:
+        st.info("No lexical signals found. Run `python cli.py derive --pass lexical`.")
+    elif not lex_enough:
+        st.caption("Trends hidden until more entries are derived.")
+    else:
+        freq_label = st.radio("Group by", list(_PERIOD_FREQ), horizontal=True,
+                              index=0, key="intro_freq")
+        grouped, counts = _grouped_means(lex, _PERIOD_FREQ[freq_label])
+        if grouped.empty:
+            st.caption("Not enough dated entries to chart.")
+        else:
+            def _line(cols, title, ylabel):
+                present = [c for c in cols if c in grouped.columns]
+                if not present:
+                    return
+                long = grouped[present].reset_index().melt(
+                    id_vars="period", var_name="signal", value_name="rate"
+                )
+                fig = px.line(
+                    long, x="period", y="rate", color="signal", markers=True,
+                    labels={"period": "", "rate": ylabel}, title=title,
+                )
+                st.plotly_chart(fig, width="stretch")
+
+            c1, c2 = st.columns(2)
+            with c1:
+                _line(["self_focus"], "Self-focus (I/me/my rate)", "Rate")
+            with c2:
+                _line(["insight", "causation"], "Meaning-making", "Rate")
+            c3, c4 = st.columns(2)
+            with c3:
+                _line(["tentative", "certainty"], "Cognitive stance", "Rate")
+            with c4:
+                temporal = ["temporal_past", "temporal_present", "temporal_future"]
+                present = [c for c in temporal if c in grouped.columns]
+                if present:
+                    long = grouped[present].reset_index().melt(
+                        id_vars="period", var_name="orientation", value_name="frac"
+                    )
+                    long["orientation"] = long["orientation"].str.removeprefix("temporal_")
+                    fig = px.area(
+                        long, x="period", y="frac", color="orientation",
+                        labels={"period": "", "frac": "Fraction of tensed verbs"},
+                        title="Temporal orientation",
+                    )
+                    st.plotly_chart(fig, width="stretch")
+            st.caption(
+                "Entries per period: "
+                + ", ".join(f"{p:%Y-%m}: {c}" for p, c in counts.items())
+            )
 
 
 # --------------------------------------------------------------------------- #

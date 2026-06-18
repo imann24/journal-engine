@@ -8,3 +8,10 @@ plotly
 watchdog
 pyarrow
 pytest
+spacy
+
+# Deterministic lexical pass needs the small English model:
+#   python -m spacy download en_core_web_sm
+# Optional GPU extra — only the GoEmotions emotion pass needs these. The lexical
+# pass and all existing features run without them:
+#   pip install transformers torch

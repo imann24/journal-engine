@@ -42,6 +42,22 @@ def _path(env: str, default: str) -> Path:
 DB_PATH: str = str(_path("JOURNAL_DB", "./journal_lancedb"))
 TABLE: str = os.environ.get("JOURNAL_TABLE", "entries")
 
+# Signal store: typed, versioned derivation outputs (see journal/signal_store.py
+# and passes/deterministic.py). `signals` holds one row per (chunk, namespace,
+# key); `entry_signals` is the chunk->entry rollup materialized for the dashboard.
+SIGNALS_TABLE: str = os.environ.get("JOURNAL_SIGNALS_TABLE", "signals")
+ENTRY_SIGNALS_TABLE: str = os.environ.get("JOURNAL_ENTRY_SIGNALS_TABLE", "entry_signals")
+
+# Pinned GoEmotions model revision (a commit hash, not "main") so a re-pull can
+# never silently move the emotion numbers. Flows into the pass's model_tag.
+GOEMOTIONS_REVISION: str = os.environ.get(
+    "JOURNAL_GOEMOTIONS_REVISION", "d75048347613a25d77de8cf6412eaae9fa7b26be"
+)
+
+# Below this many entries with signals, the Emotion/Introspection dashboard tabs
+# refuse to imply precision — they show a "not enough data yet" notice instead.
+MIN_SIGNAL_ENTRIES: int = int(os.environ.get("JOURNAL_MIN_SIGNAL_ENTRIES", "30"))
+
 # Folder you drop .txt files into for the `watch` command / manual sweeps.
 DROP_DIR: str = str(_path("JOURNAL_DROP_DIR", "./drop"))
 

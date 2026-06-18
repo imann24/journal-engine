@@ -34,6 +34,10 @@ storage + full-text search, Ollama (localhost) for embeddings and generation.
 cd journal-engine
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+python -m spacy download en_core_web_sm   # real verb tense for the lexical pass
+
+# Optional, GPU-only: the GoEmotions emotion pass. Everything else runs without it.
+pip install transformers torch
 
 cp .env.example .env
 # Edit .env and set a strong JOURNAL_PASSWORD. .env is gitignored — never commit it.
@@ -67,7 +71,14 @@ to your machine's Tailscale IP.)
    people/places/topics, mindfulness signals, recurring needs/values, topic mood
    companions, year-by-year signal weather, and gentle reflective prompts, with a
    date-range filter and a button to run/refresh enrichment.
-3. **Query** — chat-style RAG with optional From/To dates, showing the answer,
+3. **Emotion** — a 28-label GoEmotions radar for any chosen entry and a
+   stacked-area trend of the dominant emotions over time. Multi-label: entries
+   carry several feelings at once.
+4. **Introspection** — trends for self-focus, insight/causation (meaning-making),
+   tentativeness vs certainty, and temporal orientation (past/present/future).
+   Both tabs read the derived **signal store** (run `cli.py derive` first) and
+   stay quiet on sparse history — trends are gated behind a minimum entry count.
+5. **Query** — chat-style RAG with optional From/To dates, showing the answer,
    cited entry dates, and the underlying excerpts.
 
 The sidebar has a **chat-model picker** listing every model your Ollama server
@@ -80,6 +91,10 @@ python cli.py ingest ./journals                 # batch ingest a directory
 python cli.py ingest                            # sweep the drop folder
 python cli.py watch                             # auto-ingest the drop folder on change
 python cli.py enrich [--limit N] [--model TAG]  # LLM tagging pass (resumable)
+python cli.py derive --pass lexical             # deterministic psycholinguistic rates
+python cli.py derive --pass goemotions          # 28-label emotion vectors (GPU)
+python cli.py derive --pass lexical --since 2024-01-01   # only recent chunks
+python cli.py derive --aggregate                # rebuild entry-level rollups only
 python cli.py search "panic about money" --from 2019-01-01 --to 2019-12-31
 python cli.py ask "how did I talk about Max over time?" [--model TAG]
 python cli.py stats
@@ -104,6 +119,8 @@ serves). `remove` prompts for confirmation unless you pass `--yes`/`-y`.
 | `JOURNAL_EMBED_MODEL` | `bge-m3` | Embedding model. |
 | `JOURNAL_EMBED_DIM` | `1024` | Embedding dimension. |
 | `JOURNAL_CHAT_MODEL` | `nemotron-3-super:latest` | Generation/enrichment model. Use `nemotron-3-nano:latest` for faster bulk enrichment. |
+| `JOURNAL_GOEMOTIONS_REVISION` | *(pinned commit)* | GoEmotions model revision (a commit hash, not `main`) so re-pulls can't move the numbers. |
+| `JOURNAL_MIN_SIGNAL_ENTRIES` | `30` | Entries with signals required before the Emotion/Introspection tabs show time-trends. |
 | `JOURNAL_DB` | `./journal_lancedb` | LanceDB path. |
 | `JOURNAL_DROP_DIR` | `./drop` | Watched drop folder. |
 | `JOURNAL_CHUNK_WORDS` | `400` | Split entries longer than this. |
