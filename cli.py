@@ -77,6 +77,44 @@ def cmd_stats(_args) -> None:
     print_stats()
 
 
+def cmd_digest(args) -> None:
+    from journal import digest as digest_mod, insights
+    from journal.stats import load_frame
+
+    tbl = store.open_or_create()
+    entries = load_frame(tbl, date_from=args.date_from, date_to=args.date_to)
+    if entries.empty:
+        print("No entries in that period.")
+        return
+    texts = insights.full_text_map(store.table_to_df(tbl))
+    res = digest_mod.compose(
+        entries, texts=texts,
+        date_from=args.date_from or "", date_to=args.date_to or "",
+        model=args.model, force=args.rebuild,
+    )
+    print(res.text)
+    src = "cached" if res.cached else \
+        f"composed from {res.n_sampled} of {res.n_entries} entries"
+    print(f"\n— {src} · model {res.model}")
+
+
+def cmd_themes(args) -> None:
+    from journal import themes as themes_mod
+
+    theme_list, assign = themes_mod.discover(k=args.k)
+    if not theme_list:
+        print("No entries indexed yet. Run `ingest` first.")
+        return
+    print(f"{len(theme_list)} themes over {len(assign)} entries:\n")
+    for t in theme_list:
+        dates = sorted(
+            assign[assign["theme_id"] == t.theme_id]["date"].tolist()
+        )
+        span = f"{dates[0]} → {dates[-1]}" if dates else ""
+        print(f"  [{t.size:>3} entries] {t.label}   ({span})")
+        print(f"       terms: {', '.join(t.terms)}")
+
+
 def _build_pass(name: str):
     """Construct a deterministic pass by CLI name. GoEmotions is pinned to a
     specific model revision and runs on the GPU (fp16) when available."""
@@ -197,6 +235,17 @@ def main() -> None:
 
     pst = sub.add_parser("stats", help="temporal + thematic analytics")
     pst.set_defaults(func=cmd_stats)
+
+    pdg = sub.add_parser("digest", help="grounded LLM reflection for a period (cached)")
+    pdg.add_argument("--from", dest="date_from", default=None)
+    pdg.add_argument("--to", dest="date_to", default=None)
+    pdg.add_argument("--model", default=None, help="Ollama model tag (overrides default)")
+    pdg.add_argument("--rebuild", action="store_true", help="ignore the cache")
+    pdg.set_defaults(func=cmd_digest)
+
+    pth = sub.add_parser("themes", help="cluster entry embeddings into themes (no LLM)")
+    pth.add_argument("--k", type=int, default=None, help="number of themes (default: auto)")
+    pth.set_defaults(func=cmd_themes)
 
     pd_ = sub.add_parser("derive", help="run a deterministic signal pass + roll up")
     pd_.add_argument("--pass", dest="pass_name", choices=["lexical", "goemotions"],

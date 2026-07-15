@@ -105,3 +105,27 @@ Reasonable choices made during the one-shot build, so they're easy to revisit.
     extra needed only by the GoEmotions pass (lazy-imported), so the rest of the
     engine — and the test suite — runs without them. GoEmotions runs on GPU
     (`device=0`, fp16) when CUDA is available.
+
+18. **Insight overhaul stays inside the approved stack.** The Home/Explore tabs
+    (`journal/insights.py`, `journal/themes.py`, `journal/digest.py`) add no
+    dependencies: insights are pure pandas; theme discovery is a small seeded
+    k-means written against numpy, which is already a hard transitive dependency
+    of pandas/pyarrow (nothing new is installed); digests use the existing
+    Ollama `chat`. Clustering is deterministic (seeded k-means++), labeled by
+    distinctive words vs. the corpus, so themes are reproducible with no model
+    call — LLM naming is an optional, clearly-separated extra.
+
+19. **Period digests are cached in SQLite next to the conversations DB** (inside
+    the gitignored LanceDB folder). The cache key hashes the period, the model
+    tag, and every in-range entry's `content_hash`, so editing or re-ingesting
+    any entry in the range invalidates its digests automatically — no manual
+    cache management, and a digest can never silently describe stale text.
+
+20. **RAG became conversational without a query-rewrite model call.** `ask()`
+    now passes recent chat history to the model and, for short follow-ups
+    (≤5 words), concatenates the previous user question into the retrieval
+    query — cheap and predictable versus an extra LLM round-trip for query
+    condensation. Date filters can be inferred from the question, but only
+    conservatively: explicit years and "last/this year", never guessed seasons
+    or months, and an explicit From/To always wins. The applied range is shown
+    under the answer so auto-filtering is never invisible.

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Streamlit web UI for the local journal engine.
 
-Three areas, all behind a single-password gate (Streamlit-native, no extra auth
-dependency): Add entries, Analysis dashboard, Query (RAG chat).
+All areas sit behind a single-password gate (Streamlit-native, no extra auth
+dependency): Home (on-this-day, writing rhythm, highlights, period
+reflections), Add entries, Manage entries, Analysis dashboard, Explore
+(person/place/topic drill-down + semantic themes), Emotion, Introspection,
+and Query (multi-turn RAG chat).
 
 The password is read from JOURNAL_PASSWORD (via .env / environment) and compared
 with hmac.compare_digest. If it is unset the app refuses to start. Binds to
@@ -23,7 +26,10 @@ import streamlit as st
 
 # config.load_dotenv() runs on import, populating JOURNAL_PASSWORD et al.
 from journal import config, ingest as ingest_mod, llm, store, conversations
+from journal import digest as digest_mod
+from journal import insights as insights_mod
 from journal import signal_store as ss
+from journal import themes as themes_mod
 from journal.webauth import COOKIE_NAME, auth_token, verify_password, verify_token
 from journal.enrich import enrich, pending_entries
 from journal.rag import ask
@@ -220,10 +226,140 @@ with st.sidebar:
             pass  # cookie may already be absent
         st.rerun()
 
-tab_add, tab_manage, tab_dash, tab_emotion, tab_intro, tab_query = st.tabs(
-    ["➕ Add entries", "📂 Manage entries", "📊 Analysis",
-     "🎭 Emotion", "🔍 Introspection", "💬 Query"]
+(tab_home, tab_add, tab_manage, tab_dash, tab_explore,
+ tab_emotion, tab_intro, tab_query) = st.tabs(
+    ["✨ Home", "➕ Add entries", "📂 Manage entries", "📊 Analysis",
+     "🧭 Explore", "🎭 Emotion", "🔍 Introspection", "💬 Query"]
 )
+
+
+def load_corpus():
+    """(df_all, entries, texts, total_words) for the insight tabs — one read of
+    the entries table, shared shapes everywhere."""
+    tbl = get_table()
+    try:
+        df_all = store.table_to_df(tbl)
+    except Exception:
+        df_all = pd.DataFrame()
+    if df_all.empty:
+        return df_all, pd.DataFrame(), pd.Series(dtype=str), 0
+    entries = load_frame(tbl)
+    texts = insights_mod.full_text_map(df_all)
+    return df_all, entries, texts, int(df_all["word_count"].sum())
+
+
+def render_entry_expander(row, texts) -> None:
+    """One entry as an expander: date + mood in the title, full text inside."""
+    mood = int(row.get("mood", 0) or 0)
+    mood_str = f" · mood {mood}/5" if mood > 0 else ""
+    topics = str(row.get("topics", "") or "")
+    title = f"**{row['date']}**{mood_str}" + (f" · _{topics}_" if topics else "")
+    with st.expander(title):
+        st.write(texts.get(row["entry_id"], row.get("text", "")))
+        st.caption(f"`{row['entry_id']}`")
+
+
+# --------------------------------------------------------------------------- #
+# 0. Home — the daily landing surface: on this day, rhythm, highlights,
+#    period reflections. All instant reads except the (cached) reflection.
+# --------------------------------------------------------------------------- #
+with tab_home:
+    df_all_h, entries_h, texts_h, total_words_h = load_corpus()
+    if entries_h.empty:
+        st.info("No entries yet. Add some on the **Add entries** tab and this "
+                "page becomes your daily landing spot.")
+    else:
+        cad = insights_mod.cadence_stats(entries_h, total_words=total_words_h)
+        m = st.columns(5)
+        m[0].metric("Entries", f"{cad['entries']:,}")
+        m[1].metric("Years", cad["years"])
+        m[2].metric("Words", f"{cad['total_words']:,}")
+        m[3].metric("Longest daily streak", f"{cad['longest_streak']} d")
+        m[4].metric("Since last entry", f"{cad['current_gap']} d",
+                    help=f"Median gap between entries: {cad['median_gap']:.0f} d")
+
+        col_otd, col_hl = st.columns([3, 2])
+        with col_otd:
+            st.markdown(f"#### 📅 On this day ({date.today():%B %-d})")
+            otd = insights_mod.on_this_day(entries_h, window=0)
+            if otd.empty:
+                otd = insights_mod.on_this_day(entries_h, window=3)
+                if not otd.empty:
+                    st.caption("Nothing on the exact date — showing ±3 days.")
+            if otd.empty:
+                st.caption("No past entries near this date yet.")
+            for _, row in otd.head(6).iterrows():
+                render_entry_expander(row, texts_h)
+        with col_hl:
+            st.markdown("#### 🌟 Highlights")
+            for fact in insights_mod.highlights(entries_h, total_words=total_words_h):
+                st.markdown(f"- {fact}")
+
+        rhythm = insights_mod.writing_rhythm(entries_h)
+        if len(rhythm) >= 1:
+            fig = px.imshow(
+                rhythm, aspect="auto",
+                labels={"x": "Month", "y": "Year", "color": "Entries"},
+                title="Writing rhythm",
+            )
+            st.plotly_chart(fig, width="stretch")
+
+        swings = insights_mod.mood_swings(entries_h)
+        if not swings.empty:
+            st.markdown("#### 🎢 Biggest mood swings")
+            st.caption("Consecutive entries with the largest mood change — "
+                       "often the days most worth re-reading.")
+            for _, s in swings.iterrows():
+                arrow = "↑" if s["delta"] > 0 else "↓"
+                st.markdown(
+                    f"- **{s['prev_date']} → {s['date']}**: mood "
+                    f"{int(s['prev_mood'])} → {int(s['mood'])} ({arrow}"
+                    f"{abs(int(s['delta']))})"
+                )
+
+        st.divider()
+        st.markdown("#### 🪞 Period reflection")
+        st.caption(
+            "A short grounded narrative of a period, composed locally by "
+            f"`{selected_model()}` from a sample of its entries and cached — "
+            "recomposing a period you've already read is instant."
+        )
+        years_h = sorted(entries_h["year"].dropna().unique(), reverse=True)
+        presets = ["Last 30 days", "Last 90 days", "Last 365 days"] + \
+                  [f"Year {y}" for y in years_h] + ["All time"]
+        rc1, rc2 = st.columns([2, 1])
+        with rc1:
+            preset = st.selectbox("Period", presets, key="digest_preset")
+        today = date.today()
+        if preset.startswith("Last "):
+            days = int(preset.split()[1])
+            d_from, d_to = (today - timedelta(days=days)).isoformat(), today.isoformat()
+        elif preset.startswith("Year "):
+            y = preset.split()[1]
+            d_from, d_to = f"{y}-01-01", f"{y}-12-31"
+        else:
+            d_from, d_to = cad["first"], cad["last"]
+        with rc2:
+            st.metric("Range", f"{d_from} → {d_to}")
+
+        if st.button("Compose reflection", type="primary"):
+            in_range = load_frame(get_table(), date_from=d_from, date_to=d_to)
+            if in_range.empty:
+                st.warning("No entries in that period.")
+            else:
+                with st.spinner("Reading the period and composing…"):
+                    result = digest_mod.compose(
+                        in_range, texts=texts_h, date_from=d_from, date_to=d_to,
+                        model=selected_model(),
+                    )
+                st.session_state["last_digest"] = result
+        if st.session_state.get("last_digest"):
+            result = st.session_state["last_digest"]
+            st.markdown(result.text)
+            src = "cached" if result.cached else \
+                f"newly composed from {result.n_sampled} of {result.n_entries} entries"
+            st.caption(f"_{src} · model `{result.model}` · grounded in your "
+                       "entries only — verify dates against the excerpts._")
 
 
 # --------------------------------------------------------------------------- #
@@ -658,6 +794,176 @@ with tab_dash:
 
 
 # --------------------------------------------------------------------------- #
+# Explore — drill into any person, place, or topic (timeline, mood, company,
+# the entries themselves, and inline grounded Q&A), plus semantic themes
+# discovered from the embeddings already in the index.
+# --------------------------------------------------------------------------- #
+_LENS_COLS = {"People": "people", "Places": "places", "Topics": "topics"}
+_LENS_QUESTIONS = {
+    "People": "How has my relationship with {t} changed over time?",
+    "Places": "What has {t} meant to me across these entries?",
+    "Topics": "How has my thinking about {t} evolved?",
+}
+
+with tab_explore:
+    df_all_x, entries_x, texts_x, _ = load_corpus()
+    if entries_x.empty:
+        st.info("No entries yet. Add some on the **Add entries** tab.")
+    else:
+        st.subheader("Explore")
+        if not has_enrichment(entries_x):
+            st.info("Run enrichment on the **Analysis** tab to unlock the "
+                    "people / places / topics explorer. Themes below work "
+                    "without it.")
+        else:
+            lens = st.radio("Lens", list(_LENS_COLS), horizontal=True,
+                            key="explore_lens")
+            col = _LENS_COLS[lens]
+            catalog = insights_mod.entity_catalog(entries_x, col)
+            if catalog.empty:
+                st.caption(f"No {col} extracted yet.")
+            else:
+                pick_col, table_col = st.columns([2, 3])
+                with pick_col:
+                    labels = [
+                        f"{r.token}  ({r.mentions})"
+                        for r in catalog.itertuples()
+                    ]
+                    picked = st.selectbox(f"Pick from {len(catalog)} {col}",
+                                          labels, key=f"explore_pick_{col}")
+                    token = catalog.iloc[labels.index(picked)]["token"]
+                with table_col:
+                    with st.expander(f"Full {col} catalog"):
+                        st.dataframe(catalog, width="stretch", hide_index=True)
+
+                row = catalog[catalog["token"] == token].iloc[0]
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Mentions", int(row["mentions"]))
+                m2.metric("First seen", row["first_seen"])
+                m3.metric("Last seen", row["last_seen"])
+                mood_val = row["mean_mood"]
+                m4.metric("Mean mood",
+                          "—" if pd.isna(mood_val) else f"{mood_val:.1f}/5")
+
+                tl = insights_mod.entity_timeline(entries_x, col, token)
+                if len(tl) >= 1:
+                    fig = go.Figure()
+                    fig.add_bar(x=tl["year"], y=tl["mentions"], name="Mentions")
+                    if tl["mean_mood"].notna().any():
+                        fig.add_scatter(
+                            x=tl["year"], y=tl["mean_mood"], name="Mean mood",
+                            yaxis="y2", mode="lines+markers",
+                        )
+                        fig.update_layout(
+                            yaxis2={"overlaying": "y", "side": "right",
+                                    "range": [1, 5], "title": "Mood"},
+                        )
+                    fig.update_layout(
+                        title=f"“{token}” over the years",
+                        yaxis={"title": "Entries mentioning"},
+                        legend={"orientation": "h"},
+                    )
+                    st.plotly_chart(fig, width="stretch")
+
+                cc1, cc2 = st.columns(2)
+                other = "topics" if col != "topics" else "people"
+                with cc1:
+                    st.markdown(f"**Keeps company with ({other})**")
+                    co = insights_mod.co_mentions(entries_x, col, token, other)
+                    if co.empty:
+                        st.caption("(nothing recurring)")
+                    else:
+                        fig = px.bar(x=co.values, y=co.index, orientation="h",
+                                     labels={"x": "Shared entries", "y": ""})
+                        fig.update_yaxes(autorange="reversed")
+                        st.plotly_chart(fig, width="stretch")
+                with cc2:
+                    st.markdown("**Ask your journal**")
+                    default_q = _LENS_QUESTIONS[lens].format(t=token)
+                    q = st.text_input("Question", value=default_q,
+                                      key=f"explore_q_{col}")
+                    if st.button("Ask", key=f"explore_ask_{col}") and q.strip():
+                        with st.spinner("Retrieving and reasoning…"):
+                            ans = ask(q, k=10, tbl=get_table(),
+                                      model=selected_model())
+                        st.markdown(ans.text)
+                        if ans.excerpts:
+                            with st.expander("Cited excerpts"):
+                                for h in ans.excerpts:
+                                    st.markdown(
+                                        f"**[{h['date']}]** · `{h['entry_id']}`")
+                                    st.text(h["text"][:1200])
+
+                st.markdown(f"**Entries mentioning “{token}”**")
+                mentioning = insights_mod.entity_entries(entries_x, col, token)
+                for _, e_row in mentioning.head(15).iterrows():
+                    render_entry_expander(e_row, texts_x)
+                if len(mentioning) > 15:
+                    st.caption(f"…and {len(mentioning) - 15} more.")
+
+        st.divider()
+        st.subheader("Themes")
+        st.caption(
+            "Recurring themes discovered by clustering the entry embeddings "
+            "already in your index — deterministic, no model call. Labels are "
+            "each theme's most distinctive words."
+        )
+        n_x = len(entries_x)
+        if n_x < 8:
+            st.caption("Themes need at least 8 entries to be meaningful.")
+        else:
+            k = st.slider("Number of themes", 2, min(12, n_x // 2),
+                          value=min(themes_mod.default_k(n_x), n_x // 2),
+                          key="themes_k")
+            if st.button("Discover themes"):
+                with st.spinner("Clustering entries…"):
+                    ids, dates_t, X, txts = themes_mod.entry_matrix(df_all_x)
+                    theme_list, assign = themes_mod.cluster_entries(
+                        ids, dates_t, X, txts, k=k
+                    )
+                st.session_state["themes"] = (theme_list, assign)
+            if st.session_state.get("themes"):
+                theme_list, assign = st.session_state["themes"]
+                if st.button("✨ Name themes with the model",
+                             help="Asks the local model for friendlier titles, "
+                                  "grounded in each theme's words and excerpts."):
+                    with st.spinner("Naming themes…"):
+                        tmap = dict(zip(assign["entry_id"],
+                                        (texts_x.get(e, "") for e in assign["entry_id"])))
+                        theme_list = themes_mod.name_themes(
+                            theme_list, tmap, model=selected_model())
+                        label_of = {t.theme_id: t.label for t in theme_list}
+                        assign["label"] = assign["theme_id"].map(label_of)
+                        st.session_state["themes"] = (theme_list, assign)
+
+                share = themes_mod.theme_year_share(assign)
+                if len(share) > 1:
+                    long = share.reset_index().melt(
+                        id_vars="year", var_name="theme", value_name="share")
+                    fig = px.area(long, x="year", y="share", color="theme",
+                                  labels={"share": "Share of entries"},
+                                  title="Theme river")
+                    st.plotly_chart(fig, width="stretch")
+
+                for t in theme_list:
+                    with st.expander(
+                        f"**{t.label}** — {t.size} entries · "
+                        f"_{', '.join(t.terms)}_"
+                    ):
+                        sub = entries_x[entries_x["entry_id"].isin(t.entry_ids)]
+                        sub = sub.sort_values("date", ascending=False)
+                        for _, e_row in sub.head(10).iterrows():
+                            mood = int(e_row.get("mood", 0) or 0)
+                            mood_str = f" · mood {mood}/5" if mood > 0 else ""
+                            st.markdown(f"**{e_row['date']}**{mood_str}")
+                            st.caption(
+                                str(texts_x.get(e_row["entry_id"],
+                                                e_row.get("text", "")))[:400])
+                        if len(sub) > 10:
+                            st.caption(f"…and {len(sub) - 10} more.")
+
+
+# --------------------------------------------------------------------------- #
 # Signal-store tabs (Emotion / Introspection) — query the derived signal store.
 # --------------------------------------------------------------------------- #
 _PERIOD_FREQ = {"Month": "M", "Quarter": "Q", "Year": "Y"}
@@ -929,6 +1235,14 @@ with tab_query:
             q_k = st.number_input("Excerpts to retrieve", 1, 30, value=st.session_state["q_k"])
             st.session_state["q_k"] = q_k
 
+        auto_dates = st.checkbox(
+            "🗓️ Infer dates from the question",
+            value=True,
+            help="With no dates set above, years mentioned in the question "
+                 "(\"in 2019\", \"between 2019 and 2021\", \"last year\") "
+                 "become the date filter automatically.",
+        )
+
         active_id = st.session_state["active_conv_id"]
 
         # Option to persist/save this conversation
@@ -987,10 +1301,16 @@ with tab_query:
                         prompt, k=int(q_k),
                         date_from=q_from or None, date_to=q_to or None,
                         tbl=get_table(), model=selected_model(),
+                        history=st.session_state["chat"][:-1],
+                        auto_dates=auto_dates,
                     )
                 body = ans.text
                 if ans.cited_dates:
                     body += f"\n\n*— entries dated: {', '.join(ans.cited_dates)}*"
+                if ans.auto_dated:
+                    body += (f"\n\n*— auto-filtered to {ans.date_from} → "
+                             f"{ans.date_to} from the question; set dates above "
+                             "to override*")
                 st.markdown(body)
                 if ans.excerpts:
                     with st.expander("Cited excerpts"):

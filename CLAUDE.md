@@ -54,13 +54,24 @@ journal/
   webauth.py     pure HMAC token helpers for the persistent-login cookie
   ingest.py      one idempotent/incremental pipeline for all sources
   search.py      hybrid RRF search + date prefilter
-  rag.py         grounded Q&A with citations + graceful refusal
+  rag.py         grounded multi-turn Q&A with citations, graceful refusal, and
+                 auto date-range inference from the question
   enrich.py      re-runnable per-entry LLM tagging (mood/topics/people/places)
   stats.py       analytics over enriched columns (entry-level)
+  insights.py    pure-pandas derived insights: on-this-day, cadence/streaks,
+                 mood swings, entity (people/places/topics) catalogs+timelines
+  themes.py      semantic theme discovery: deterministic numpy k-means over the
+                 stored entry vectors, labeled by distinctive words (no LLM)
+  digest.py      grounded LLM period reflections, cached in SQLite keyed by
+                 (period, model, content hashes) so edits invalidate the cache
   watch.py       watchdog drop-folder auto-ingest
-cli.py           ingest / enrich / search / ask / stats / watch / list / remove
-app.py           Streamlit UI: Add entries / Analysis / Query (all behind auth),
-                 sidebar chat-model picker (remembered per browser)
+cli.py           ingest / enrich / search / ask / stats / digest / themes /
+                 derive / watch / list / remove
+app.py           Streamlit UI (all behind auth): Home (on-this-day, rhythm,
+                 highlights, period reflections) / Add / Manage / Analysis /
+                 Explore (entity drill-down + themes) / Emotion / Introspection
+                 / Query (multi-turn RAG); sidebar chat-model picker
+                 (remembered per browser)
 tests/           date inference (critical), chunking, ingest idempotency
 run_web.sh       launches the UI bound to JOURNAL_WEB_HOST:JOURNAL_WEB_PORT
 ```

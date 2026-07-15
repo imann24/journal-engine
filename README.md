@@ -61,6 +61,13 @@ or expose it publicly. (To scope it strictly to Tailscale, set `JOURNAL_WEB_HOST
 to your machine's Tailscale IP.)
 
 ### Web UI areas
+0. **Home** — the daily landing surface: corpus-wide metrics (entries, years,
+   words, streaks), **On this day** lookbacks across every past year, a
+   writing-rhythm heatmap, notable highlights, biggest mood swings, and
+   **period reflections** — short grounded narratives of any month/year/range,
+   composed by the local model, cited by entry date, and cached (recomposing a
+   period you've already read is instant; editing an entry in the range
+   invalidates its cache automatically).
 1. **Add entries** — paste a single entry (optional date; inferred if blank), paste
    a batch (split on `---`/`===` or blank lines), or upload multiple `.txt` files.
    Submitting dates → chunks → embeds → indexes immediately and shows you exactly
@@ -71,15 +78,25 @@ to your machine's Tailscale IP.)
    people/places/topics, mindfulness signals, recurring needs/values, topic mood
    companions, year-by-year signal weather, and gentle reflective prompts, with a
    date-range filter and a button to run/refresh enrichment.
-3. **Emotion** — a 28-label GoEmotions radar for any chosen entry and a
+3. **Explore** — drill into any **person, place, or topic**: mentions and mood
+   over the years, first/last seen, what it "keeps company with", the entries
+   themselves, and an inline **ask-your-journal** box pre-seeded with a question
+   about it. Below that, **Themes**: recurring themes discovered by clustering
+   the entry embeddings already in the index (deterministic, no model call),
+   with a theme river over the years and optional model-generated titles.
+4. **Emotion** — a 28-label GoEmotions radar for any chosen entry and a
    stacked-area trend of the dominant emotions over time. Multi-label: entries
    carry several feelings at once.
-4. **Introspection** — trends for self-focus, insight/causation (meaning-making),
+5. **Introspection** — trends for self-focus, insight/causation (meaning-making),
    tentativeness vs certainty, and temporal orientation (past/present/future).
    Both tabs read the derived **signal store** (run `cli.py derive` first) and
    stay quiet on sparse history — trends are gated behind a minimum entry count.
-5. **Query** — chat-style RAG with optional From/To dates, showing the answer,
-   cited entry dates, and the underlying excerpts.
+6. **Query** — chat-style RAG that now remembers the conversation (follow-up
+   questions keep their context, and short follow-ups reuse the previous
+   question for retrieval) and infers date filters from the question ("in
+   2019", "between 2019 and 2021", "last year") when no explicit dates are set,
+   noting the applied range under the answer. Shows the answer, cited entry
+   dates, and the underlying excerpts.
 
 The sidebar has a **chat-model picker** listing every model your Ollama server
 serves; the choice drives RAG answers and enrichment and is remembered per
@@ -98,6 +115,8 @@ python cli.py derive --aggregate                # rebuild entry-level rollups on
 python cli.py search "panic about money" --from 2019-01-01 --to 2019-12-31
 python cli.py ask "how did I talk about Max over time?" [--model TAG]
 python cli.py stats
+python cli.py digest --from 2019-01-01 --to 2019-12-31   # grounded period reflection (cached)
+python cli.py themes [--k N]                    # cluster entries into themes (no LLM)
 python cli.py list                              # list indexed entries + ids
 python cli.py remove 2019-07-14.txt             # remove by entry id
 python cli.py remove --from 2019-01-01 --to 2019-12-31   # remove a date range

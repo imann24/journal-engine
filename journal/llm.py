@@ -7,18 +7,24 @@ import ollama
 from . import config
 
 
-def chat(prompt: str, system: str | None = None, temperature: float = 0.2,
-         model: str | None = None) -> str:
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+def chat_messages(messages: list[dict], temperature: float = 0.2,
+                  model: str | None = None) -> str:
+    """Full-message-list variant, used by multi-turn RAG."""
     resp = ollama.chat(
         model=model or config.CHAT_MODEL,
         messages=messages,
         options={"temperature": temperature},
     )
     return resp["message"]["content"].strip()
+
+
+def chat(prompt: str, system: str | None = None, temperature: float = 0.2,
+         model: str | None = None) -> str:
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    return chat_messages(messages, temperature=temperature, model=model)
 
 
 def list_models() -> list[str]:
